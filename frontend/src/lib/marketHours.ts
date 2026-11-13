@@ -106,6 +106,32 @@ const US_HOLIDAYS_2026 = [
   '2026-12-25', // Christmas
 ];
 
+const US_HOLIDAYS_2027 = [
+  '2027-01-01', // New Year's Day
+  '2027-01-18', // MLK Day
+  '2027-02-15', // Presidents Day
+  '2027-03-26', // Good Friday
+  '2027-05-31', // Memorial Day
+  '2027-06-18', // Juneteenth (observed, Jun 19 = Sat)
+  '2027-07-05', // Independence Day (observed, Jul 4 = Sun)
+  '2027-09-06', // Labor Day
+  '2027-11-25', // Thanksgiving
+  '2027-12-24', // Christmas (observed, Dec 25 = Sat)
+];
+
+const US_HOLIDAYS_2028 = [
+  // No New Year's Day closure: Jan 1, 2028 is a Saturday and NYSE does not observe it on Dec 31.
+  '2028-01-17', // MLK Day
+  '2028-02-21', // Presidents Day
+  '2028-04-14', // Good Friday
+  '2028-05-29', // Memorial Day
+  '2028-06-19', // Juneteenth
+  '2028-07-04', // Independence Day
+  '2028-09-04', // Labor Day
+  '2028-11-23', // Thanksgiving
+  '2028-12-25', // Christmas
+];
+
 // Early close at 1pm ET
 const US_EARLY_CLOSE_2025 = [
   '2025-07-03', // Independence Day observed
@@ -116,6 +142,16 @@ const US_EARLY_CLOSE_2025 = [
 const US_EARLY_CLOSE_2026 = [
   '2026-11-27', // Day after Thanksgiving
   '2026-12-24', // Christmas Eve
+];
+
+// 2027: no Christmas Eve early close, because Dec 24 is the observed Christmas holiday.
+const US_EARLY_CLOSE_2027 = [
+  '2027-11-26', // Day after Thanksgiving
+];
+
+const US_EARLY_CLOSE_2028 = [
+  '2028-07-03', // Day before Independence Day
+  '2028-11-24', // Day after Thanksgiving
 ];
 
 const UK_HOLIDAYS_2025 = [
@@ -282,12 +318,12 @@ const getTimeInTimezone = (tz: string, now: Date = new Date()): { hours: number;
 
 export const isUSHoliday = (date: Date): boolean => {
   const dateStr = getETDateString(date);
-  return [...US_HOLIDAYS_2025, ...US_HOLIDAYS_2026].includes(dateStr);
+  return [...US_HOLIDAYS_2025, ...US_HOLIDAYS_2026, ...US_HOLIDAYS_2027, ...US_HOLIDAYS_2028].includes(dateStr);
 };
 
 export const isUSEarlyClose = (date: Date): boolean => {
   const dateStr = getETDateString(date);
-  return [...US_EARLY_CLOSE_2025, ...US_EARLY_CLOSE_2026].includes(dateStr);
+  return [...US_EARLY_CLOSE_2025, ...US_EARLY_CLOSE_2026, ...US_EARLY_CLOSE_2027, ...US_EARLY_CLOSE_2028].includes(dateStr);
 };
 
 export const isUKHoliday = (date: Date): boolean => {
