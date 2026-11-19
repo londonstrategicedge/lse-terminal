@@ -869,6 +869,8 @@ const ProChart: React.FC<ProChartProps> = ({
   // axis-width calculation and label rendering always agree on string length.
   const formatPrice = useCallback((price: number) => {
     return formatPriceForSymbol(price, symbol);
+    // No source named: this chart replays a source that declares no digits
+    // (the manual backtest's), so it reads none (setPriceDigits).
   }, [symbol]);
 
   const formatTime = useCallback((timestamp: number) => {

@@ -33,7 +33,7 @@ import {
 // EyeOff and X dropped with the icons on the indicator context menu (the menu
 // is text-only now, matching the shell); nothing else in this file used them.
 import { Settings, Eye, Trash2, MoreHorizontal } from 'lucide-react';
-import { calculatePriceAxisWidth, formatPriceForSymbol } from '@/lib/utils';
+import { calculatePriceAxisWidth, formatPriceForSymbol, priceDigitsVersion } from '@/lib/utils';
 import { getChartDeviceConfig, getDeviceFlags } from './deviceConfig';
 import { RIGHT_TOOLBAR_WIDTH } from './RightToolbar';
 import { EconomicEvent } from './ChartLeftSidebar';
@@ -142,6 +142,7 @@ const ProChart: React.FC<ProChartProps> = ({
   drawingCursorRef,
   requestRedrawRef,
   isDrawingDragging = false,
+  priceSource,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -396,6 +397,9 @@ const ProChart: React.FC<ProChartProps> = ({
   // The converter MUST use this same range to prevent drawings from drifting during scroll
   const renderedPriceRangeRef = useRef<{ min: number; max: number; range: number } | null>(null);
   const mainChartHeightRef = useRef<number>(0);
+  // The size this axis's price labels choose their places by (priceAxisScale),
+  // set once a frame before any label is drawn; formatPrice reads it.
+  const priceLabelScaleRef = useRef<number | undefined>(undefined);
   // Track which indicator line the mouse is hovering near (for cursor changes)
   const hoveredIndicatorLineRef = useRef<string | null>(null);
 
@@ -730,8 +734,8 @@ const ProChart: React.FC<ProChartProps> = ({
     // Desktop gets larger axis for better readability with bigger fonts.
     // If rightOffset === 0, the RightToolbar is not overlaying the axis
     // (e.g. trading panel open pushes it away), so we collapse the toolbar gap.
-    return calculatePriceAxisWidth(isMobile, symbol, samplePrice || 100, rightOffset);
-  }, [isMobile, isDesktop, symbol, samplePrice, rightOffset]);
+    return calculatePriceAxisWidth(isMobile, symbol, samplePrice || 100, rightOffset, priceSource);
+  }, [isMobile, isDesktop, symbol, samplePrice, rightOffset, priceSource, priceDigitsVersion()]);
 
   // Axis chrome reads from the active device config block. To change phone
   // axis height/fonts, edit deviceConfig.ts PHONE; desktop and tablet are
@@ -1014,8 +1018,9 @@ const ProChart: React.FC<ProChartProps> = ({
   // Delegate to the shared formatting function in utils.ts so that the
   // axis-width calculation and label rendering always agree on string length.
   const formatPrice = useCallback((price: number) => {
-    return formatPriceForSymbol(price, symbol);
-  }, [symbol]);
+    return formatPriceForSymbol(price, symbol, priceSource, priceLabelScaleRef.current);
+    // its own source's declared decimals (setPriceDigits) are part of what it prints
+  }, [symbol, priceSource, priceDigitsVersion()]);
 
   const formatTime = useCallback((timestamp: number) => {
     const date = new Date(timestamp);
@@ -1605,6 +1610,18 @@ const ProChart: React.FC<ProChartProps> = ({
     // Minimum pixel gap between grid lines, prevents overcrowding in
     // vertically-stacked multi-panel layouts (2x2, 1x2, etc.)
     const MIN_GRID_GAP = 25;
+    // One number of places for every price label of this frame, its
+    // crosshair's and its last price's: the quote's larger side,
+    // max(|bid|, |ask|), the same size the ticket and the rest of the page use
+    // (quoteScale), so a declared precision reads the same places on the chart
+    // as it does beside it ("9999.800" on both, not "9,999.50" against
+    // "9999.500") across a power of ten. The page keeps the last quote, so a
+    // held instrument always has one; before its first tick, no size, and each
+    // label takes its own, as the page does with no quote.
+    priceLabelScaleRef.current = (() => {
+      const sides = [brokerBid, brokerAsk].map(Number).filter((v) => isFinite(v) && v !== 0).map(Math.abs);
+      return sides.length ? Math.max(...sides) : undefined;
+    })();
     ctx.beginPath();
     let lastGridY = -Infinity;
     for (let price = startPrice; price <= priceRange.max; price += priceStep) {

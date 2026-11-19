@@ -1,7 +1,7 @@
 {
   "name": "lse-terminal-desktop",
   "productName": "LSE Terminal",
-  "version": "0.0.13",
+  "version": "0.1.10",
   "description": "LSE Terminal desktop app: local backtesting on the Brue engine",
   "main": "main.js",
   "author": "London Strategic Edge",

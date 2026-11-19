@@ -5,13 +5,12 @@
 # paths are script-relative. Prereqs once: Xcode Command Line Tools
 # (xcode-select --install), python3 3.10+, node 20+.
 #
-# The brue and brue-connect SIBLING CLONES ARE REQUIRED next to this repo:
-#   <parent>/lse-terminal  <parent>/brue  <parent>/brue-connect
-# pyproject depends on "brue-lang", which is NOT on PyPI yet; installing the
-# app without the sibling first would make pip ask the public index for it
-# (and the bare "brue" name there is a stranger's package). The
-# siblings are installed FIRST so pip sees the dependency satisfied and
-# never asks PyPI for it.
+# The brue SIBLING CLONE IS REQUIRED next to this repo:
+#   <parent>/lse-terminal  <parent>/brue
+# It holds the Brue language and Brue Connect, the broker kit the app
+# bundles. It is installed FIRST so pip sees the brue-language dependency
+# satisfied by that checkout, and the app bundles its Brue Connect rather
+# than a copy from PyPI.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -24,7 +23,7 @@ if [ "$(uname -s)" != "Darwin" ]; then
   exit 1
 fi
 
-for sib in brue brue-connect; do
+for sib in brue; do
   if [ ! -f "$ROOT/../$sib/pyproject.toml" ]; then
     echo "missing sibling clone ../$sib; clone it next to lse-terminal first" >&2
     exit 1
@@ -34,7 +33,7 @@ done
 echo "== python venv"
 # Check the interpreter BEFORE building a venv from it. A stock Mac resolves
 # python3 to the Command Line Tools shim, which is 3.9; this project and
-# brue-connect both declare requires-python >= 3.10, so a venv built on the
+# brue both declare requires-python >= 3.10, so a venv built on the
 # shim fails several steps later inside pip with a message that says nothing
 # about which python was wrong. PYTHON=/path/to/python3 overrides.
 PY="${PYTHON:-python3}"
@@ -54,7 +53,15 @@ if [ ! -x "$VENV/bin/python" ]; then
   "$PY" -m venv "$VENV"
 fi
 "$VENV/bin/pip" install --quiet --upgrade pip
-"$VENV/bin/pip" install --quiet -e "$ROOT/../brue" -e "$ROOT/../brue-connect"
+# An earlier build installed a separate brue-connect here; left in a reused
+# venv it is imported (and bundled) before the Brue Connect inside ../brue.
+"$VENV/bin/pip" uninstall --quiet -y brue-connect >/dev/null 2>&1 || true
+"$VENV/bin/pip" install --quiet -e "$ROOT/../brue"
+KIT="$("$VENV/bin/python" -c 'import brueconnect, os; print(os.path.realpath(os.path.dirname(brueconnect.__file__)))')"
+if [ "$KIT" != "$(cd "$ROOT/../brue/brueconnect" && pwd -P)" ]; then
+  echo "brueconnect resolves to $KIT, not ../brue/brueconnect; remove the old copy from $VENV first" >&2
+  exit 1
+fi
 "$VENV/bin/pip" install --quiet -e "$ROOT" pyinstaller
 
 echo "== frozen sidecar (PyInstaller onedir)"

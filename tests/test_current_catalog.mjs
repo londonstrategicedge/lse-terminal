@@ -1,0 +1,12 @@
+import fs from 'node:fs';import vm from 'node:vm';import assert from 'node:assert/strict';
+const source=fs.readFileSync(new URL('../lse_terminal/ui/static/app.js',import.meta.url),'utf8');
+const start=source.indexOf('async function loadInstruments('),end=source.indexOf('\n}\n',start)+2;
+const rows=Array.from({length:15037},(_,i)=>({symbol:`S${i}`,name:`Company ${i}`,category:'Stocks'}));
+const urls=[],options={innerHTML:''};let renders=0;
+const c={state:{provider:'lse',lseConfigured:true},encodeURIComponent,setTimeout,fetch:async url=>{urls.push(new URL(url,'http://localhost'));return{ok:true,json:async()=>rows}},$:()=>options,renderWatchlist:()=>renders++,chartPushDigits:()=>{},status:()=>{throw Error('unexpected failure')}};
+vm.createContext(c);vm.runInContext(source.slice(start,end),c);
+await c.loadInstruments();assert.equal(urls.at(-1).searchParams.get('all_current'),'true');assert.equal(c.state.instruments.length,15037);assert.equal(c.state.catBySym.S15036,'Stocks');assert.equal(renders,1);
+await c.loadInstruments('SMIN');assert.equal(urls.at(-1).searchParams.has('all_current'),false);assert.equal(urls.at(-1).searchParams.get('limit'),'30');assert.equal(renders,1);
+c.state.provider='broker:sample';await c.loadInstruments();assert.equal(urls.at(-1).searchParams.has('all_current'),false);assert.equal(urls.at(-1).searchParams.get('limit'),'5000');
+assert.match(source,/const WL_CHUNK = 200;/);assert.match(source,/g\.items\.slice\(0, shownFor\)/);
+console.log('Full LSE discovery keeps >5000 rows; search and other providers remain bounded; sidebar keeps 200-row reveal.');

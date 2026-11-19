@@ -31,6 +31,17 @@
      the other candle in the panel's ink. The logo's SHAPE is what identifies
      it; a candle nobody can see identifies nothing. */
   --logo-up: #2E7D32; --logo-down: #e8e8e8;
+  /* Connections (the LSE row, the brokers, "+ Add your own broker"): black
+     and white only, never a bright green. An action is a black button with
+     white writing, its light edge keeping it off the charcoal; what is in
+     use, connected or the step you are on is inverted, the ink as a fill
+     with black writing; a link is the ink, underlined. */
+  --cs-act: #000000; --cs-act-h: #161616; --cs-act-ink: #ffffff;
+  --cs-act-edge: #5c5c5c; --cs-act-edge-h: #8c8c8c;
+  --cs-on: #e8e8e8; --cs-on-ink: #000000;
+  --cs-ring: rgba(232, 232, 232, .18);
+  --cs-input-bg: #1c1c1c; --cs-input-border: #555555; --cs-placeholder: #80868f;
+  --cs-code-bg: #1c1c1c; --cs-thread: #4a4a4a;
   --bg2: #262626;          /* code wells, previews */
   --hover: #343434;        /* card + row hover fills */
   --active: #414141;       /* selected rows, active-surface grey */
@@ -62,6 +73,12 @@ html:not(.dark) {
   --text: #23262b; --dim: #43474e; --up: #0d8a7d; --down: #d22b57;
   /* On light, both brand colours are exactly the logo's. */
   --logo-up: #2E7D32; --logo-down: #1a1a2e;
+  --cs-act: #000000; --cs-act-h: #2b2b2b; --cs-act-ink: #ffffff;
+  --cs-act-edge: #000000; --cs-act-edge-h: #2b2b2b;
+  --cs-on: #000000; --cs-on-ink: #ffffff;
+  --cs-ring: rgba(0, 0, 0, .14);
+  --cs-input-bg: #f7f8fa; --cs-input-border: #8c939d; --cs-placeholder: #6b7280;
+  --cs-code-bg: #f3f4f6; --cs-thread: #cfd3d9;
   --bg2: #f0f1f4;
   --hover: #eef0f3;
   --active: #e8eaee;
@@ -213,6 +230,18 @@ nav#timeframes button:disabled { opacity: .35; cursor: default; }
 }
 #github-btn:hover { color: var(--text); background: var(--hover); }
 #github-btn svg { display: block; }
+/* NEW WINDOW: the GitHub link's dress, as a button. The word folds away on
+   a narrow window so the header never wraps; the icon and its title stay. */
+#win-new {
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; border-bottom: 2px solid transparent;
+  border-radius: 0; color: var(--dim); font-size: 11.5px; font-weight: 600;
+  letter-spacing: .09em; padding: 4px 12px 5px 12px; white-space: nowrap;
+}
+#win-new:hover { color: var(--text); background: var(--hover); }
+#win-new svg { display: block; flex: none; }
+#win-new.hidden { display: none; }
+@media (max-width: 1360px) { #win-new span { display: none; } #win-new { padding: 4px 8px 5px 8px; } }
 /* Updates: only ever on screen when a newer release exists, so it carries
    the text colour rather than the dim one. The dot marks work waiting, not
    an accent the rest of the header never uses. */
@@ -439,13 +468,27 @@ aside#side.collapsed #side-fold { display: none; }
 /* Connection screen: the full-surface version of the conn-menu dropdown. Same
    zinc chrome as the other modals; the broker LOGOS are the only colour on the
    surface (house rule: chrome stays neutral, no saturated accents). */
+/* The sheet hangs from one place near the top and grows downward. Centred,
+   it moved every row on it whenever the rows under them came or one of them
+   opened: on a quick second open, about 50 px up under the pointer. It hangs
+   6vh from the top, or 12px below the header (its bottom and the rule under
+   it, --cs-top, set by csHang when the sheet opens and when the window
+   changes size) when that is lower: hung at 6vh alone, on windows about 860
+   to 1200 px tall its top ran across the header's second row. Its foot stays
+   6vh above the window's. Its thin scroll bar's room is kept from the start,
+   so rows that take it past its cap never narrow (or wrap again) the rows
+   painted before them, and that room is taken from its right padding below
+   (--cs-gutter), so its rows have as much room on the right as on the left. */
 #conn-screen {
+  --cs-hang: max(6vh, calc(var(--cs-top, 0px) + 12px));
   position: fixed; inset: 0; z-index: 60; display: flex;
-  align-items: center; justify-content: center; background: var(--overlay);
+  align-items: flex-start; justify-content: center; padding-top: var(--cs-hang);
+  background: var(--overlay);
 }
 #conn-screen.hidden { display: none; }
 #cs-card {
-  width: min(880px, 94vw); max-height: 88vh; overflow-y: auto;
+  width: min(880px, 94vw); max-height: calc(94vh - var(--cs-hang, 6vh)); overflow-y: auto;
+  scrollbar-gutter: stable;
   background: var(--panel); border: 1px solid var(--edge); border-radius: 3px;
   padding: 14px 16px;
 }
@@ -569,8 +612,14 @@ html:not(.dark) #inq-actions button:hover { background: #cfd3d9; border-color: #
 /* The account in use: the one row that is not a choice. */
 .cs-acct.inuse { cursor: default; opacity: 1;
   background: var(--active); border-color: var(--dim);
-  border-left-color: var(--logo-up); }
+  border-left-color: var(--text); }
 .cs-acct:disabled:not(.inuse) { opacity: .45; cursor: default; }
+/* Before Connect: the accounts the login reached when last connected, as
+   information, not a control (no hover, no pointer); the one used last is
+   said in words, not inverted, because nothing is in use yet. */
+.cs-acct.cs-acct-info, .cs-acct.cs-acct-info:hover { cursor: default; background: transparent;
+  border-left-color: var(--line-strong); }
+.cs-acct-last { font-size: 12px; font-weight: 600; color: var(--text); }
 .cs-acct-name { font-size: 13px; font-weight: 600; color: var(--text); }
 .cs-acct-tags { display: flex; align-items: center; gap: 6px; }
 /* No box. LIVE and DEMO are a word, set in the panel's own type: a chip
@@ -580,7 +629,7 @@ html:not(.dark) #inq-actions button:hover { background: #cfd3d9; border-color: #
   text-transform: uppercase; color: var(--dim); }
 .cs-acct.live .cs-acct-tag { color: var(--text); font-weight: 700; }
 .cs-acct-use { font: 700 9px var(--mono); letter-spacing: .07em;
-  text-transform: uppercase; color: var(--logo-up); }
+  text-transform: uppercase; color: var(--text); }
 .cs-acct-id { font: 10.5px var(--mono); color: var(--dim); }
 .cs-acct-bal { font: 11.5px var(--mono); color: var(--text);
   font-variant-numeric: tabular-nums; text-align: right; }
@@ -625,6 +674,13 @@ html:not(.dark) #inq-actions button:hover { background: #cfd3d9; border-color: #
 .cs-bheadmid .cs-pickname { flex: none; font-weight: 600; }
 .cs-bhead .cs-btag { font-size: 11px; color: var(--dim); overflow: hidden;
   text-overflow: ellipsis; white-space: nowrap; }
+/* The Connections rows read at the add row's size: a 30px mark (a broker's own
+   logo where it has one), the name at 14px, its line at 12.5px. */
+.cs-brow > .cs-bhead { font-size: 14px; padding: 11px 14px; gap: 12px; }
+.cs-brow > .cs-bhead .cs-pickmark { width: 30px; height: 30px; border-radius: 6px; }
+.cs-brow > .cs-bhead .cs-pickinit { font-size: 10.5px; }
+.cs-brow > .cs-bhead .cs-btag { font-size: 12.5px; }
+.cs-brow > .cs-bhead .cs-pickstate { font-size: 10px; }
 .cs-pickmark { flex: none; width: 22px; height: 22px; border-radius: 2px;
   border: 1px solid var(--edge); background: var(--bg2);
   display: flex; align-items: center; justify-content: center;
@@ -685,6 +741,10 @@ html:not(.dark) #inq-actions button:hover { background: #cfd3d9; border-color: #
   color: var(--dim); font-size: 10.5px; text-transform: uppercase;
   letter-spacing: .05em; }
 .cs-form input { font-size: 13px; }
+/* A key box (csSecretBox): a text box masked here, so no browser's password
+   manager takes it for a login; a browser without this property gets a
+   password box from the script instead. */
+.cs-secret { -webkit-text-security: disc; }
 .cs-form .cs-fhelp { text-transform: none; letter-spacing: 0; font-size: 10px;
   color: var(--dim); font-style: italic; }
 .cs-bactions { display: flex; gap: 6px; margin-top: 2px; }
@@ -696,6 +756,149 @@ html:not(.dark) #inq-actions button:hover { background: #cfd3d9; border-color: #
    same quiet mono as every other state word, and the card says why. */
 .cs-pickstate.upd { color: var(--text); }
 .cs-bupd { color: var(--dim); font-size: 12px; line-height: 1.5; margin: 2px 0 8px; }
+
+/* ── Add your own broker ─────────────────────────────────────────────────
+   A broker the user linked is a row like any other; what differs is stated
+   in words, in the same quiet mono every other state on this screen uses. */
+/* The broker's own name and, beside it, the profile ID the user gave it. The
+   ID is the one name on the row the adapter did not choose, so it is always
+   there and always legible, never truncated away by a long display name. */
+.cs-pickline { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.cs-pickline .cs-pickname { flex: 0 1 auto; }
+.cs-pickid { flex: none; font: 10.5px var(--mono); color: var(--dim); }
+/* LIVE is said by wording and weight, not by an alarm colour (the same rule
+   the account rows follow, .cs-acct.live): real money is normal for most
+   traders, and a red label trains people to stop seeing it. */
+.cs-live { color: var(--text); font-weight: 700; }
+/* Inside the connected row's pill the word takes the pill's own ink: the
+   page's ink there is the pill's own colour in the dark theme, which hid
+   LIVE (#e8e8e8 on #e8e8e8). */
+.cs-pickstate.ok .cs-live { color: inherit; }
+/* ── "+ Add your own broker": the row, its three steps, the developers' fold ──
+   The one place on this screen that asks the user to do something new, so it
+   reads in the theme's own ink, black and white like the rest of the screen:
+   a black action, the step you are on inverted. Every colour is a variable:
+   the light theme follows on its own. */
+.cs-brow.cs-add { border-style: dashed; border-color: var(--line-strong); }
+.cs-brow.cs-add.open { border-style: solid; }
+.cs-addhead { display: flex; align-items: center; gap: 12px; width: 100%;
+  text-align: left; font: inherit; color: var(--text); background: transparent;
+  border: none; cursor: pointer; padding: 12px 14px; }
+.cs-addhead:hover { background: var(--hover); }
+.cs-brow.cs-add.open .cs-addhead { background: var(--bg2); }
+.cs-addplus { flex: none; width: 30px; height: 30px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; line-height: 1; color: var(--text);
+  border: 1.5px solid var(--line-strong); }
+.cs-addheadmid { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.cs-addtitle { font-size: 14px; font-weight: 600; }
+.cs-addsub { font-size: 12.5px; color: var(--dim); }
+.cs-brow.cs-add.open .cs-pickcaret { transform: rotate(180deg); }
+.cs-examples { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.cs-examples .cs-accts-label { flex-basis: 100%; }
+
+.cs-bcard.cs-addcard { gap: 14px; padding: 18px 18px 14px; }
+.cs-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.cs-step { position: relative; display: flex; gap: 14px; padding-bottom: 20px; }
+.cs-step:last-child { padding-bottom: 4px; }
+/* the thread from one number to the next */
+.cs-step:not(:last-child)::before { content: ""; position: absolute; left: 13px; top: 32px;
+  bottom: 6px; width: 2px; border-radius: 1px; background: var(--edge); }
+.cs-stepnum { flex: none; width: 28px; height: 28px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 13.5px; font-weight: 700; color: var(--text); background: transparent; }
+.cs-stepmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 9px; padding-top: 4px; }
+.cs-steptitle { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.cs-steptext { margin: 0; font-size: 13px; line-height: 1.55; color: var(--dim); max-width: 62em; }
+.cs-stepwarn { color: var(--text); }
+.cs-steprow { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; }
+.cs-steplink { font-size: 13px; color: var(--text); text-decoration: underline;
+  text-underline-offset: 3px; text-decoration-thickness: 1px; }
+.cs-steplink:hover { text-decoration-thickness: 2px; }
+.cs-steplink::after { content: " \2192"; }
+
+/* one black action per step, a quiet secondary beside it */
+.cs-addcard .cs-btn { display: inline-flex; align-items: center; justify-content: center;
+  font: inherit; font-size: 13px; font-weight: 600; line-height: 1; padding: 10px 18px;
+  border-radius: 6px; border: 1px solid transparent; cursor: pointer; text-decoration: none; }
+.cs-addcard .cs-btn-primary { background: var(--cs-act); border-color: var(--cs-act-edge); color: var(--cs-act-ink); }
+.cs-addcard .cs-btn-primary:hover:not(:disabled) { background: var(--cs-act-h); border-color: var(--cs-act-edge-h); }
+.cs-addcard .cs-btn-primary:disabled { opacity: .6; cursor: default; }
+.cs-addcard .cs-btn-ghost { background: transparent; color: var(--text); border-color: var(--line-strong);
+  font-weight: 500; }
+.cs-addcard .cs-btn-ghost:hover { background: var(--hover); }
+
+.cs-form.cs-addform { gap: 14px; max-width: 640px; }
+.cs-form.cs-addform label.cs-field { display: flex; flex-direction: column; gap: 6px;
+  text-transform: none; letter-spacing: 0; font-size: 12.5px; color: var(--text); }
+.cs-fieldlabel { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.cs-addform input { font-size: 13.5px; padding: 9px 11px; border-radius: 6px;
+  border: 1px solid var(--edge); background: var(--bg); color: var(--text); }
+.cs-addform input:focus { outline: none; border-color: var(--text);
+  box-shadow: 0 0 0 3px var(--cs-ring); }
+
+.cs-addform .cs-fhelp { font-size: 12px; font-style: normal; line-height: 1.45; color: var(--dim);
+  text-transform: none; letter-spacing: 0; }
+.cs-more > summary, .cs-dev > summary { cursor: pointer; list-style: none; font-size: 12.5px;
+  color: var(--dim); user-select: none; }
+.cs-more > summary::-webkit-details-marker, .cs-dev > summary::-webkit-details-marker { display: none; }
+.cs-more > summary::before, .cs-dev > summary::before { content: "\25B8"; display: inline-block;
+  width: 14px; transition: transform .15s; }
+.cs-more[open] > summary::before, .cs-dev[open] > summary::before { transform: rotate(90deg); }
+.cs-more > summary:hover, .cs-dev > summary:hover { color: var(--text); }
+.cs-more[open] > .cs-field { margin-top: 10px; }
+
+/* the developers' fold: the kit's test of an adapter, run on this computer */
+.cs-dev { border-top: 1px solid var(--edge); padding-top: 12px; }
+.cs-dev[open] > .cs-test { margin-top: 12px; }
+.cs-test { display: flex; flex-direction: column; gap: 8px; }
+.cs-testlabel { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.cs-testrow { display: flex; align-items: flex-start; gap: 8px; }
+.cs-testcmd { flex: 1; min-width: 0; font: 12px/1.6 var(--mono); color: var(--text);
+  white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg);
+  border: 1px solid var(--edge); border-radius: 6px; padding: 10px 12px; }
+.cs-addcard button.cs-copy { flex: none; font-size: 12.5px; padding: 9px 14px; border-radius: 6px; }
+.cs-test > .cs-note { font-size: 12px; font-style: normal; line-height: 1.5; }
+/* What the adapter wrote to stderr before it failed: a traceback, so it keeps
+   its line breaks and its own spacing, in a well, and scrolls rather than
+   pushing the buttons off the card. Neutral ink: the sentence above it is
+   the error, this is the evidence. */
+.cs-errtail { font: 10.5px/1.45 var(--mono); color: var(--dim);
+  white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg2);
+  border: 1px solid var(--edge); border-radius: 2px; padding: 6px 8px;
+  max-height: 150px; overflow: auto; }
+.cs-errtail.hidden, .cs-trade.hidden, .cs-empty.hidden { display: none; }
+/* Under a broker's refusal: which of its boxes hold nothing. Ours, not the
+   broker's, so it is plain ink rather than the error's red mono. */
+.cs-empty { font-size: 12px; color: var(--text); margin-top: 4px; }
+/* Which keys are saved (names, never values), and what the user can do about
+   it. The two actions are words, not buttons with a fill: neither is the
+   thing most people came to this card to do. */
+.cs-saved { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px;
+  font-size: 11.5px; color: var(--dim); }
+.cs-saved span { flex: 1 1 auto; }
+.cs-bcard button.cs-quiet { border: none; background: transparent; padding: 0;
+  font-size: 11.5px; color: var(--dim); text-decoration: underline;
+  cursor: pointer; }
+.cs-bcard button.cs-quiet:hover { color: var(--text); }
+/* Unlink sits at the far end of the action row, away from Connect. */
+.cs-bactions .cs-unlink { margin-left: auto; }
+/* What a linked broker runs. Long paths wrap anywhere rather than widen the
+   card. */
+.cs-cmd { overflow-wrap: anywhere; }
+/* What just happened on this card: said plainly, not in the italic of a
+   broker's own note. */
+.cs-note.cs-said { font-style: normal; color: var(--text); }
+/* Whether a connected live broker may be sent orders: a sentence and, when it
+   may not, the one button that changes that. */
+.cs-trade { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px;
+  font-size: 12px; color: var(--text); font-weight: 600; }
+.cs-trade span { flex: 1 1 200px; }
+.cs-trade.armed { font-weight: 400; color: var(--dim); }
+/* A sidebar that shows part of a catalog says so, in the folders' own dim
+   mono, above the folders it is a part of. */
+.wnote { padding: 6px 10px 2px; font: 10.5px var(--mono); color: var(--dim);
+  line-height: 1.4; }
 
 /* LSE databank import modal. Same zinc chrome as the other modals; three
    panes (datasets / instruments / pull settings) because the catalog is 20k+
@@ -793,6 +996,39 @@ section#charts { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   pointer-events: none; text-shadow: var(--legend-shadow);
 }
 #legend b { color: var(--text); font-weight: 600; }
+/* The chart area's own word (chartNote in app.js): a failed or empty candle
+   load says so here, over the chart and above the legend. Opaque, so no bar
+   of the previous instrument shows beneath it. The source's message can be
+   long and is the user's to copy. */
+#chart-note {
+  position: absolute; inset: 0; z-index: 6;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 24px; text-align: center; background: var(--bg);
+}
+#chart-wrap.noted #chart-pro { visibility: hidden; }
+/* ...and at once: some of the chart's controls fade (transition-all), which
+   delays an inherited "hidden" by the length of the fade and left them over
+   the note for a fraction of a second. */
+#chart-wrap.noted #chart-pro * { visibility: hidden !important; transition: none !important; }
+#chart-note .cn-title { color: var(--text); font-size: 14px; font-weight: 600; }
+#chart-note[data-kind="loading"] .cn-title { color: var(--dim); font-weight: 400; }
+#chart-note .cn-detail {
+  color: var(--text); font-size: 12.5px; line-height: 1.5; max-width: 620px;
+  overflow-wrap: anywhere; white-space: pre-wrap; user-select: text;
+}
+#chart-note button { padding: 5px 16px; background: var(--panel); }
+/* Older bars that arrived after the user had moved or zoomed the chart wait
+   behind this button (chartGrow in app.js): bottom left of the plot, clear
+   of the tool rail, the legend and the zoom strip. Same level as the note,
+   so it never shows through a screen laid over the page. */
+#chart-more {
+  position: absolute; left: 60px; bottom: 38px; z-index: 6;
+  padding: 4px 10px; font-size: 12px; color: var(--text);
+  background: var(--panel); border-color: var(--line-strong);
+  box-shadow: 0 2px 10px var(--shadow);
+}
+#chart-more:hover { background: var(--hover); }
+#chart-note button:hover { border-color: var(--line-strong); background: var(--hover); }
 #panes { display: flex; flex-direction: column; }
 
 /* ── account dock: MT-style strip under the chart (MARKETS only) ────────
@@ -1169,6 +1405,9 @@ section#charts { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .air-auto-row.active { background: var(--active); }
 .air-auto-name { color: var(--text); font-size: 12.5px; font-weight: 600; }
 .air-auto-desc { color: var(--dim); font-size: 11.5px; }
+/* A model the CLI names but cannot run until it is updated: shown so the
+   user knows it exists, dimmed because it cannot be picked yet. */
+.air-auto-row.needs-update .air-auto-name { color: var(--dim); font-weight: 500; }
 
 /* Model switcher: same quiet chrome as the autonomy button, pinned to the
    top right (margin-left:auto pushes it and the gear to the edge). The menu
@@ -1186,6 +1425,8 @@ section#charts { flex: 1; display: flex; flex-direction: column; min-width: 0; }
   width: 285px; padding: 4px; background: var(--panel);
   border: 1px solid var(--edge); border-radius: 6px;
   box-shadow: 0 10px 28px var(--shadow);
+  /* The rows are the provider's whole lineup now, not five typed ones. */
+  max-height: 70vh; overflow-y: auto;
 }
 
 /* Per-turn revert (Phase 4 checkpoints): quiet affordance that appears on
@@ -1628,6 +1869,7 @@ table.air-md-table th { color: var(--dim); font-weight: 600; }
 .air-menu-item.on.sel { background: #3a3a3a; }
 html:not(.dark) .air-menu-item.on { background: #d5d8dd; }
 html:not(.dark) .air-menu-item.on.sel { background: #c6cad1; }
+.air-menu-item.off .air-menu-label { color: var(--dim); }
 .air-menu-label { color: var(--text); flex: 0 0 auto; }
 .air-menu-desc {
   color: var(--dim); font-size: 12px; flex: 1 1 auto; min-width: 0;
@@ -2272,7 +2514,10 @@ button.ml-dep-count.missing::after { content: " \00b7 install"; color: var(--dim
 #ml-libs .ml-lib-name { font-weight: 600; color: var(--text); font-family: var(--mono); font-size: 11.5px; }
 #ml-libs .ml-lib-status { color: var(--dim); }
 #ml-libs .ml-lib-status.on { color: var(--text); }
-#ml-libs .ml-lib-status.busy { color: var(--text); font-family: var(--mono); font-size: 10.5px; }
+/* An installer's own line, whole in the cell's tooltip: one grid column, so a
+   long line is cut here with a visible "…", never in the words (mlInstall). */
+#ml-libs .ml-lib-status.busy { color: var(--text); font-family: var(--mono); font-size: 10.5px;
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ml-libs .ml-lib-status.bad { color: var(--down); }
 #ml-libs .ml-lib-models { color: var(--dim); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #ml-libs .ml-lib-done { font-family: var(--mono); font-size: 10.5px; color: var(--dim); letter-spacing: .06em; text-transform: uppercase; }
@@ -2926,7 +3171,21 @@ html:not(.dark) .hl-v { color: #001080; }
    text weight the rest of the strip uses. */
 .tpx-mcell > span.tpx-short { color: var(--down); }
 #tpx-msg { font-size: 11px; min-height: 14px; margin-top: 6px; color: var(--dim); }
-#tpx-msg.err { color: #e05d5d; } #tpx-msg.ok { color: #58a05a; }
+/* A line in two parts (tpxSay while a request is held): the answer in its
+   own style, then the warning in the error style. */
+#tpx-msg.err, #tpx-msg .err { color: #e05d5d; } #tpx-msg.ok, #tpx-msg .ok { color: #58a05a; }
+/* Ask again, and Place as new beside it: black and white like every action
+   here; under the line that says the request's answer was lost. Show, in the
+   same place, when the line names another broker's held request. */
+/* Connect, when the line names a request held on a broker that is not
+   connected; Switch back, when Ask again was refused for another account. */
+#tpx-again, #tpx-new, #tpx-show, #tpx-conn, #tpx-back { margin-top: 6px; padding: 4px 10px; font-size: 11px;
+  cursor: pointer; background: var(--text); color: var(--bg); border: 1px solid var(--text); border-radius: 2px; }
+#tpx-new, #tpx-back { margin-left: 6px; }
+#tpx-again:hover, #tpx-new:hover, #tpx-show:hover, #tpx-conn:hover, #tpx-back:hover { opacity: 0.85; }
+#tpx-again:disabled, #tpx-new:disabled, #tpx-show:disabled, #tpx-conn:disabled,
+#tpx-back:disabled { opacity: 0.5; cursor: default; }
+#tpx-again.hidden, #tpx-new.hidden, #tpx-show.hidden, #tpx-conn.hidden, #tpx-back.hidden { display: none; }
 /* Rail widgets: user-picked cards between the ticket and the assistant.
    Neutral chrome; each card body scrolls inside a
    capped height so a long list never eats the chat below, and the stack
@@ -3787,3 +4046,187 @@ html:not(.dark) #gd-side {
   cursor: pointer; margin-left: auto;
 }
 #scr-card-chart:hover { background: var(--edge); }
+
+/* ── Connections: one type scale, one row design ───────────────────────────
+   Readable first: every size on this screen comes from this scale: the panel
+   title 20px, section labels 12px, a row's name 15px and its line 13px, a
+   step's title 16px, body, inputs and buttons 14px, help and notes 13px;
+   nothing under 12px. Every row has a 36px tile (the LSE mark, a broker's
+   logo, the +), so every name starts on one line. Status is a pill in words
+   (Connected inverted, never green), never grey capitals in a code font. */
+#cs-card { border-radius: 10px; padding: 20px 22px;
+  padding-right: max(0px, calc(22px - var(--cs-gutter, 0px))); }
+#cs-head { font-size: 20px; font-weight: 600; margin-bottom: 18px; }
+#cs-head button { width: 32px; height: 32px; border-radius: 6px; font-size: 22px; line-height: 1; }
+#cs-head button:hover { background: var(--hover); }
+.cs-section { font-size: 12px; font-weight: 600; letter-spacing: .06em; margin: 22px 0 10px; }
+
+.cs-tile { flex: none; width: 36px; height: 36px; border-radius: 8px; display: flex;
+  align-items: center; justify-content: center; background: var(--bg2); border: 1px solid var(--edge); }
+.cs-lse { border-radius: 8px; padding: 14px 16px; }
+.cs-lse-row { gap: 14px; }
+.cs-lse .cs-tile .cs-mark, .cs-lse .cs-tile .cs-mark svg { width: 22px; height: 22px; }
+.cs-lse-name { font-size: 15px; font-weight: 600; }
+.cs-lse-state { font-size: 13px; margin-top: 3px; }
+.cs-lse-act { gap: 8px; align-items: center; }
+.cs-lse-act .cs-act { font: inherit; font-size: 13.5px; font-weight: 500; height: 34px; padding: 0 14px;
+  border-radius: 6px; border: 1px solid var(--line-strong); background: transparent; color: var(--text); cursor: pointer; }
+.cs-lse-act .cs-act:hover { background: var(--hover); }
+.cs-lse-act .cs-act.primary { background: var(--cs-act); border-color: var(--cs-act-edge); color: var(--cs-act-ink); font-weight: 600; }
+.cs-lse-act .cs-act.primary:hover { background: var(--cs-act-h); border-color: var(--cs-act-edge-h); }
+.cs-pill, .cs-brow > .cs-bhead .cs-pickstate { display: inline-flex; align-items: center; gap: 6px; height: 26px;
+  padding: 0 11px; border-radius: 999px; font: inherit; font-size: 12.5px; font-weight: 600; letter-spacing: 0;
+  text-transform: none; color: var(--dim); background: var(--bg2); border: 1px solid var(--edge); white-space: nowrap; }
+.cs-pill.ok, .cs-brow > .cs-bhead .cs-pickstate.ok { color: var(--cs-on-ink); background: var(--cs-on); border-color: var(--cs-on); }
+.cs-pill.ok::before, .cs-brow > .cs-bhead .cs-pickstate.ok::before { content: ""; width: 7px; height: 7px;
+  border-radius: 50%; background: currentColor; }
+
+.cs-brow { border-radius: 8px; margin-bottom: 10px; }
+.cs-brow > .cs-bhead { font-size: 15px; padding: 14px 16px; gap: 14px; min-height: 64px; }
+.cs-brow > .cs-bhead .cs-pickmark { width: 36px; height: 36px; border-radius: 8px; }
+.cs-brow > .cs-bhead .cs-pickinit { font-size: 12px; }
+.cs-brow > .cs-bhead .cs-btag { font-size: 13px; }
+.cs-brow .cs-pickid { font: inherit; font-size: 12px; color: var(--dim); background: var(--bg2);
+  border: 1px solid var(--edge); border-radius: 999px; padding: 1px 8px; }
+.cs-brow .cs-pickcaret { width: 8px; height: 8px; border: none; margin: 0 4px 3px 6px;
+  border-right: 2px solid var(--dim); border-bottom: 2px solid var(--dim); transform: rotate(45deg); }
+.cs-brow.open .cs-pickcaret, .cs-brow.cs-add.open .cs-pickcaret { transform: rotate(-135deg); margin-bottom: -3px; }
+
+.cs-addhead { padding: 14px 16px; gap: 14px; min-height: 64px; }
+.cs-addplus { width: 36px; height: 36px; border-radius: 8px; border: 1px solid var(--edge); background: var(--bg2);
+  color: var(--text); font-size: 24px; font-weight: 400; }
+.cs-addtitle { font-size: 15px; }
+.cs-addsub { font-size: 13px; }
+
+.cs-bcard.cs-addcard { padding: 20px 20px 16px; }
+.cs-stepmain { max-width: 640px; }
+.cs-steptitle { font-size: 16px; }
+.cs-steptext { font-size: 14px; }
+.cs-step:not(:last-child)::before { background: var(--cs-thread); }
+.cs-stepnum { background: transparent; border: 1.5px solid var(--line-strong); color: var(--text); font-size: 14px; }
+.cs-step.current .cs-stepnum { background: var(--cs-on); border-color: var(--cs-on); color: var(--cs-on-ink); }
+.cs-step.done .cs-stepnum { background: transparent; border-color: var(--text); color: var(--text); }
+.cs-addcard .cs-btn { font-size: 14px; }
+.cs-steplink { font-size: 14px; }
+.cs-steplink-plain::after { content: none; }
+.cs-saved { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 8px; font-size: 14px; color: var(--text); }
+.cs-saved code { font: 13px var(--mono); background: var(--cs-code-bg); border: 1px solid var(--edge);
+  border-radius: 5px; padding: 3px 8px; overflow-wrap: anywhere; }
+.cs-form.cs-addform label.cs-field { font-size: 13px; }
+.cs-fieldlabel { font-size: 13px; }
+.cs-addform input { font-size: 14px; background: var(--cs-input-bg); border-color: var(--cs-input-border); }
+.cs-addform input::placeholder { color: var(--cs-placeholder); }
+.cs-addform .cs-fhelp { font-size: 13px; }
+.cs-more > summary, .cs-dev > summary { display: flex; align-items: center; gap: 10px; font-size: 14px; }
+.cs-more > summary::before, .cs-dev > summary::before { content: ""; width: 7px; height: 7px; margin-left: 2px;
+  border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(-45deg);
+  transition: transform .15s; }
+.cs-more[open] > summary::before, .cs-dev[open] > summary::before { transform: rotate(45deg); }
+.cs-devsteps { margin: 0; padding-left: 22px; list-style: decimal; font-size: 14px; line-height: 1.6;
+  color: var(--text); }
+.cs-devsteps li { margin: 3px 0; }
+.cs-testrow { position: relative; }
+.cs-testcmd { font-size: 13px; background: var(--cs-code-bg); padding: 12px 88px 12px 14px;
+  overflow-wrap: break-word; word-break: normal; }
+.cs-testrow .cs-copy, .cs-addcard .cs-testrow button.cs-copy { position: absolute; top: 8px; right: 8px; height: 30px;
+  padding: 0 12px; border-radius: 6px; font-size: 12.5px; background: var(--panel); color: var(--text);
+  border: 1px solid var(--line-strong); }
+.cs-devnote { margin: 0; font-size: 13px; line-height: 1.6; color: var(--dim); max-width: 760px; }
+.cs-devnote code { font: 12.5px var(--mono); color: var(--text); background: var(--cs-code-bg);
+  border: 1px solid var(--edge); border-radius: 4px; padding: 1px 5px; }
+
+/* The broker firms' door is a sentence in this screen's link style, not one
+   orange word in capitals; a round logo sits in a tile like every other
+   mark; the step you are on is lit and the later ones are quiet; an action
+   waits, faded, until it can be taken; the developers' fold lines up under
+   its own heading. */
+#cs-foot { justify-content: flex-start; margin-top: 14px; }
+#cs-foot button, html.dark #cs-foot button:hover, html:not(.dark) #cs-foot button:hover {
+  font: inherit; font-size: 13.5px; font-weight: 500; text-transform: none; letter-spacing: 0;
+  color: var(--text); background: transparent; border-color: transparent; padding: 4px 0;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
+#cs-foot button::after { content: " \2192"; }
+#cs-foot button:hover { text-decoration-thickness: 2px; }
+.cs-brow > .cs-bhead .cs-pickmark.logo-tile, .cs-brow > .cs-bhead .cs-pickmark.logo-tile:has(img) {
+  background: var(--bg2); border: 1px solid var(--edge); }
+.cs-brow > .cs-bhead .cs-pickmark.logo-tile img { width: 26px; height: 26px; }
+.cs-stepnum { color: var(--dim); }
+.cs-step.current .cs-stepnum { background: var(--cs-on); border-color: var(--cs-on); color: var(--cs-on-ink);
+  font-weight: 700; }
+
+/* Nothing on this screen is green; the account rows inside a broker's card
+   join the 12px floor the rest of it keeps, and the account in use is marked
+   like every other "in use": inverted. */
+.cs-accts-label { font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: .04em; }
+.cs-acct { padding: 11px 13px; border-radius: 6px; }
+.cs-acct-name { font-size: 14px; }
+.cs-acct-tag { font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: .06em; }
+.cs-acct-use { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border-radius: 999px;
+  font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none;
+  color: var(--cs-on-ink); background: var(--cs-on); }
+.cs-acct-id { font-size: 12px; }
+.cs-acct-bal { font-size: 13px; }
+.cs-acct-bal em { font-size: 12px; }
+.cs-acct-preview { font-size: 13px; }
+.cs-acct-go { font-family: inherit; font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.cs-addcard .cs-btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+.cs-brow .cs-pickid { background: none; border: none; padding: 0; font-size: 13px; color: var(--dim); }
+.cs-dev > .cs-test { padding-left: 19px; }
+.cs-devsteps { color: var(--dim); }
+
+
+/* The broker's own card on the same scale and in the same black and white:
+   a connected broker's card had kept 10.5px code-face lines,
+   12px grey buttons and an 11.5px Unlink. Its forward action (Connect, Use, Allow trading, Update
+   terminal) is black like every action here; "In use" is the inverted pill;
+   Disconnect is an outline; Unlink and the key words are underlined words.
+   The key form follows the add form: labels in words, 14px boxes, the ink
+   focus ring. Scoped to #cs-card: the add card has its own rules above. */
+#cs-card .cs-bcard:not(.cs-addcard) { gap: 12px; padding: 16px; }
+#cs-card .cs-bmeta { font-family: inherit; font-size: 13px; line-height: 1.5; }
+#cs-card .cs-bmeta.cs-cmd { font: 12.5px/1.5 var(--mono); overflow-wrap: anywhere; }
+#cs-card .cs-note, #cs-card .cs-support, #cs-card .cs-bupd, #cs-card .cs-empty, #cs-card .cs-hosted,
+#cs-card .cs-trade { font-size: 13px; font-style: normal; line-height: 1.5; }
+#cs-card .cs-errtail { font-size: 12px; }
+#cs-card .cs-form:not(.cs-addform) { gap: 12px; }
+#cs-card .cs-form:not(.cs-addform) label { gap: 6px; font-size: 13px; font-weight: 600; color: var(--text);
+  text-transform: none; letter-spacing: 0; }
+#cs-card .cs-form:not(.cs-addform) .cs-fhelp { font-size: 13px; font-weight: 400; font-style: normal; color: var(--dim); }
+#cs-card .cs-form:not(.cs-addform) input { font-size: 14px; padding: 9px 11px; border-radius: 6px;
+  background: var(--cs-input-bg); border: 1px solid var(--cs-input-border); color: var(--text); }
+#cs-card .cs-form:not(.cs-addform) input::placeholder { color: var(--cs-placeholder); }
+#cs-card .cs-form:not(.cs-addform) input:focus { outline: none; border-color: var(--text); box-shadow: 0 0 0 3px var(--cs-ring); }
+#cs-card .cs-bactions { gap: 8px; margin-top: 4px; align-items: center; }
+#cs-card .cs-bactions button, #cs-card .cs-trade button { font: inherit; font-size: 14px; font-weight: 500; height: 34px;
+  padding: 0 14px; border-radius: 6px; border: 1px solid var(--line-strong); background: transparent;
+  color: var(--text); cursor: pointer; }
+#cs-card .cs-bactions button:hover:not(:disabled), #cs-card .cs-trade button:hover:not(:disabled) { background: var(--hover); }
+#cs-card .cs-bactions button.cs-connect, #cs-card .cs-bactions button.cs-primary, #cs-card .cs-trade button.cs-connect {
+  background: var(--cs-act); border-color: var(--cs-act-edge); color: var(--cs-act-ink); font-weight: 600; }
+#cs-card .cs-bactions button.cs-connect:hover:not(:disabled), #cs-card .cs-bactions button.cs-primary:hover:not(:disabled),
+#cs-card .cs-trade button.cs-connect:hover:not(:disabled) { background: var(--cs-act-h); border-color: var(--cs-act-edge-h); }
+#cs-card .cs-bactions button:disabled { opacity: .45; cursor: not-allowed; }
+#cs-card .cs-bactions button.cs-inuse, #cs-card .cs-bactions button.cs-inuse:disabled { display: inline-flex; align-items: center;
+  gap: 6px; height: 26px; padding: 0 11px; border-radius: 999px; font-size: 12.5px; font-weight: 600; opacity: 1;
+  cursor: default; color: var(--cs-on-ink); background: var(--cs-on); border-color: var(--cs-on); }
+#cs-card .cs-bactions button.cs-inuse::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+#cs-card .cs-bcard button.cs-quiet, #cs-card .cs-bactions button.cs-quiet { height: auto; padding: 0; border: none;
+  background: transparent; font-size: 13px; font-weight: 500; color: var(--dim); text-decoration: underline;
+  text-underline-offset: 3px; }
+#cs-card .cs-bcard button.cs-quiet:hover, #cs-card .cs-bactions button.cs-quiet:hover:not(:disabled) {
+  color: var(--text); background: transparent; }
+/* The firms' inquiry form (its own window) on the same floor. */
+#inq-card .inq-grid label { font-size: 13px; }
+#inq-card .inq-note { font-size: 13px; }
+
+/* A broker's terms (Brue Connect SPEC 3.3): one sentence on its row, under
+   the header and level with the name, in the row's own writing; the link to
+   the terms is the ink, underlined. The same line under the question that
+   arms a live connection. */
+.cs-brow > .cs-terms { font-size: 13px; line-height: 1.5; color: var(--text);
+  padding: 0 16px 12px 66px; margin-top: -4px; overflow-wrap: anywhere; }
+.cs-terms .cs-terms-link { font-size: 13px; color: var(--text); text-decoration: underline;
+  text-underline-offset: 3px; }
+.modal-terms { font-size: 12.5px; line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
+.modal-terms .cs-terms-link { font-size: 12.5px; color: var(--text); text-decoration: underline;
+  text-underline-offset: 3px; }

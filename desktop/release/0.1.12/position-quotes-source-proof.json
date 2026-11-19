@@ -1,0 +1,12 @@
+{
+  "pass": true,
+  "verified_at": "2026-10-27T06:55:46.899566+00:00",
+  "python_modules": 142,
+  "terminal_resources": 859,
+  "packaged_resources": 860,
+  "dependency_modules_unchanged_from_private_candidate1": 2304,
+  "ui_sha256": "d6d734a5fcd6edc1e8ff90dd03bdc1d917cd6a244de5cf48666eacf81e8fd993",
+  "source_sha256_mismatches": [],
+  "package_evidence": "desktop/package2-fingerprints",
+  "scope": "Corrected ticket/held-position UI only; previous Python/SDK/dependency contracts remain identical. Final owner installation/public updater release is separately gated."
+}

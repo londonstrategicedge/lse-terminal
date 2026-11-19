@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 
 import pandas as pd
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -27,8 +27,34 @@ from lse_terminal.engine.registry import Registry, load_builtins, load_plugins
 from lse_terminal.engine.user_indicators import TEMPLATE, UserIndicators
 from lse_terminal.engine import notebooks as nbstore
 from lse_terminal.engine import workspace
+from lse_terminal.engine.streaming import bridge
 
 _STATIC = Path(__file__).resolve().parent.parent / "ui" / "static"
+
+
+def _write_whole(target: Path, text: str) -> None:
+    """`text` as the whole of `target`, mode 0600: written to a temporary file
+    in the same folder (a dot name ending .tmp, which no reader of the
+    target's own pattern matches), synced, then renamed over it. A reader
+    finds the file whole or not at all; a failure leaves nothing behind."""
+    import tempfile  # noqa: PLC0415
+    folder = target.parent
+    folder.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=str(folder), prefix=f".{target.stem}-", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.chmod(tmp, 0o600)
+        os.replace(tmp, target)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 
 # ── The built-in user guide (the TERMINAL WALKTHROUGH tab) ──
 # ONE source of truth, ui/static/guide.md: the walkthrough page renders it, the
@@ -126,6 +152,18 @@ def guide_section(query: str = "") -> str:
 ASSISTANT_URL = os.environ.get(
     "LSE_ASSISTANT_URL",
     "https://api.londonstrategicedge.com/brue-cloud/terminal-assistant")
+
+
+def _mask_account(account_id) -> str:
+    """An account id as a sentence names it, the form the card shows: an
+    ellipsis and its last dash-part ("101-004-7240139-001" -> "…-001"), or
+    the whole of a short id with no dash."""
+    s = str(account_id or "")
+    if not s:
+        return "no account"
+    if "-" in s:
+        return "…-" + s.rsplit("-", 1)[-1]
+    return "…" + s[-4:] if len(s) > 4 else s
 
 
 def _parse_indicators(raw: str) -> list[tuple[str, dict]]:
@@ -284,6 +322,19 @@ class AiSettingsIn(BaseModel):
     codex_full_access: bool
 
 
+class AiUpdateIn(BaseModel):
+    agent: str
+    # True: the user asked for this update (the menu row or /update), which
+    # also turns on keeping this CLI current. False: the page's own
+    # automatic update, allowed only where that is already on.
+    asked: bool = False
+
+
+class AiAutoUpdateIn(BaseModel):
+    agent: str
+    enabled: bool
+
+
 class AiInstructionsIn(BaseModel):
     # The rail's settings panel edits USER.md only; every other workspace
     # .md is regenerated from the brief and would silently lose hand edits.
@@ -359,8 +410,8 @@ class LseBankImportIn(BaseModel):
     # annotations` makes closure-local models unresolvable to FastAPI (it
     # reads them as query params).
     dataset: str
-    symbol: str = ""      # empty = whole-dataset pull (reference sets)
-    timeframe: str = "tick"
+    symbol: str = ""      # one market instrument or series
+    timeframe: str = "1h"
     start: str = ""
     end: str = ""
     folder: str = ""
@@ -573,6 +624,156 @@ def create_app() -> FastAPI:
                 403, "not available in the hosted terminal; download the app "
                      "from GitHub to use this")
 
+    # ── "only the terminal's own window" ─────────────────────────────────
+    # The engine-wide guard (_LocalOnlyGuard) lets ANY loopback origin in: it
+    # compares the Origin's hostname and ignores its port. So a page served by
+    # some other program on this machine (a dev server, another local app's
+    # UI) can call everything here. For most routes that is a nuisance. For
+    # the ones below it is not: they move money (arm, order, close, modify),
+    # hold keys (credentials, account), or run a program as the user (connect
+    # and probe spawn an adapter; the PTY, backtest, indicator, ML, algo and
+    # tool routes run the user's code). Those ask for the engine's OWN origin.
+    #
+    # The rule, for a request that carries browser evidence of where it came
+    # from, and only for one that does:
+    # - `Origin`, when present, must be exactly `http://<Host header>`:
+    #   scheme, host AND port. The terminal's page is served by this engine,
+    #   so its own requests always are; another port's page never is.
+    # - `Sec-Fetch-Site`, when present, must be `same-origin` (or `none`, a
+    #   request the user typed). A browser that says the request crossed
+    #   origins is believed.
+    # A native client sends neither header and passes, exactly as it does the
+    # engine-wide guard: the agent CLIs, the approval bridge, the assistant's
+    # own tools (urllib) and any MCP client that is not a web page. Hosted
+    # mode never reaches this: every route that uses it refuses hosted first,
+    # and there the public domain is the legitimate origin anyway.
+    _OWN_WINDOW = "this action is only available from the terminal's own window"
+
+    def _from_own_window(headers) -> bool:
+        host = (headers.get("host") or "").strip().lower()
+        origins = headers.getlist("origin")
+        if origins and (len(origins) > 1 or not host
+                        or origins[0].strip().lower() != "http://" + host):
+            return False
+        site = (headers.get("sec-fetch-site") or "").strip().lower()
+        return not site or site in ("same-origin", "none")
+
+    def own_origin_only(request: Request):
+        """Refuse an HTTP request that a browser says came from another
+        origin. Called after deny_hosted() by every route named above."""
+        if hosted:
+            return
+        if not _from_own_window(request.headers):
+            raise HTTPException(403, _OWN_WINDOW)
+
+    # ── "the terminal's own window, and nothing else" ─────────────────────
+    # A broker's terms (SPEC 3.3) can keep its prices on this computer, or
+    # have every order on a live account placed by the user. The terminal's
+    # page shows those prices and sends those orders from the user's clicks;
+    # a PROGRAM must get neither: the assistant's code, an agent's shell, an
+    # MCP client, a script. _from_own_window lets every program through (it
+    # sends no browser headers), so these paths ask for more: the browser has
+    # to SAY the request is this origin. A browser sends Sec-Fetch-Site:
+    # same-origin with every request a page makes to its own loopback origin,
+    # and Origin with every websocket handshake and POST; an Origin present
+    # must be exactly http://<Host>. "none" (an address typed, or opened by
+    # a browser a program drives) is not the page. A program can forge these
+    # headers, so this closes the door to code that simply calls the engine,
+    # and says why; it is not a lock against a determined one.
+    def _terminal_window(headers) -> bool:
+        host = (headers.get("host") or "").strip().lower()
+        origins = headers.getlist("origin")
+        if origins and (len(origins) > 1 or not host
+                        or origins[0].strip().lower() != "http://" + host):
+            return False
+        site = (headers.get("sec-fetch-site") or "").strip().lower()
+        return site == "same-origin" or (not site and bool(origins))
+
+    def _source_broker(provider) -> str | None:
+        """The broker profile behind a `broker:<name>` data source."""
+        p = str(provider or "")
+        return p[len("broker:"):] if p.startswith("broker:") else None
+
+    def _local_refusal(broker: str | None, what: str = "") -> str | None:
+        """The sentence a request for this broker's market data is refused
+        with when its terms keep the data on this computer, else None."""
+        if not broker:
+            return None
+        try:
+            if not hub.data_local(broker):
+                return None
+            return hub.withheld(broker, what)
+        except Exception:  # noqa: BLE001 - cannot tell: refuse, and say so
+            return ("Withheld: this broker's terms could not be read, so its "
+                    "prices stay on this computer.")
+
+    def local_data_only(request_or_ws, broker: str | None, what: str = ""):
+        """Refuse a program's request for a data_local_only connection's
+        market data (403, the sentence). The terminal's own window passes,
+        as does every request about a connection without such terms."""
+        why = _local_refusal(broker, what)
+        if why and not _terminal_window(request_or_ws.headers):
+            raise HTTPException(403, why)
+
+    def by_hand_only(request: Request, broker: str):
+        """Refuse a mutating call to an orders_by_hand_only connection that
+        is not paper unless the terminal's own window sent it: the ticket,
+        the dock and the chart are the user's own action for that order; a
+        program is not (SPEC 3.3)."""
+        try:
+            hand = hub.by_hand(broker)
+        except Exception:  # noqa: BLE001 - unreadable: the careful answer
+            hand = True
+        if hand and not _terminal_window(request.headers):
+            raise HTTPException(403, hub.by_hand_refusal(broker))
+
+    async def deny_other_origin_ws(websocket) -> bool:
+        """The same rule for an accepted websocket: True when it was refused
+        (a message, then a close), in the shape deny_hosted_ws uses. Browsers
+        stamp Origin on every websocket handshake, the page's own included,
+        so for a socket this is an exact check, not a best-effort one."""
+        if hosted or _from_own_window(websocket.headers):
+            return False
+        await websocket.send_json({"type": "error", "message": _OWN_WINDOW})
+        await websocket.close(code=4403)
+        return True
+
+    def own_window_only(request: Request, json_body: bool = True):
+        """The guard for the routes that LINK a broker: the rule above, plus
+        a declared JSON body.
+
+        Linking stores a command that is then spawned as the user, with the
+        engine's environment, on the next connect, and it survives restarts.
+        So on top of own_origin_only these routes require the body to be
+        declared `application/json`: a page cannot send that type across
+        origins without a preflight, which the engine-wide guard refuses, so
+        a form or a typeless blob can never be made to look like one of these
+        requests. (The older routes do not demand the type: their callers
+        were written before the rule and the origin check alone closes the
+        other-port hole for them.)
+        """
+        deny_hosted()
+        own_origin_only(request)
+        if json_body:
+            ctype = (request.headers.get("content-type") or "")
+            if ctype.split(";")[0].strip().lower() != "application/json":
+                raise HTTPException(
+                    415, "send this request with Content-Type: application/json")
+
+    async def json_object(request: Request, limit: int = 65536) -> dict:
+        """The request body as a JSON object, read by hand so a route's
+        guard runs before anything is parsed."""
+        raw = await request.body()
+        if len(raw) > limit:
+            raise HTTPException(413, "request body too large")
+        try:
+            body = json.loads(raw.decode("utf-8"))
+        except (ValueError, UnicodeDecodeError):
+            raise HTTPException(400, "the request body is not JSON")
+        if not isinstance(body, dict):
+            raise HTTPException(400, "the request body must be a JSON object")
+        return body
+
     app = FastAPI(title="LSE Terminal", version=__version__)
     if not hosted:
         app.add_middleware(_LocalOnlyGuard)
@@ -675,12 +876,16 @@ def create_app() -> FastAPI:
                 "providers": d.get("providers", [])}
 
     @app.get("/api/instruments")
-    def instruments(provider: str, query: str = "", limit: int = 50):
+    def instruments(provider: str, query: str = "", limit: int = 50,
+                    all_current: bool = False):
+        # Full discovery is explicit and limited to the LSE sidebar. Search
+        # and other providers keep their existing bounded request contract.
+        if all_current and (provider != "lse" or query.strip()):
+            raise HTTPException(400, "all_current requires LSE and an empty query")
         try:
-            # 5000 covers the whole chartable LSE catalog (~4.2k instruments)
-            # so the sidebar's collapsed folders can show every group; search
-            # queries still ask for 30.
-            items = reg.get(provider).search(query, limit=min(int(limit), 5000))
+            source = reg.get(provider)
+            items = source.search(
+                query, limit=None if all_current else min(int(limit), 5000))
         except ValueError as e:
             raise HTTPException(404, str(e))
         except Exception as e:
@@ -688,9 +893,33 @@ def create_app() -> FastAPI:
         # live=False marks catalog rows that exist only as history datasets
         # (no live feed, so no price board row and no stream). Providers that
         # predate the flag never set it and default to live.
-        return [{"symbol": i.symbol, "name": i.name, "category": i.category,
+        rows = [{"symbol": i.symbol, "name": i.name, "category": i.category,
                  "live": bool(i.meta.get("live", True))}
                 for i in items]
+        # A source that declares how many decimals it quotes an instrument to
+        # (a connected broker's catalog does) says so on the row; the page
+        # prints that source's prices from it. Sources that declare none keep
+        # the four keys every client already reads.
+        for row, i in zip(rows, items):
+            digits = i.meta.get("digits")
+            if isinstance(digits, int) and not isinstance(digits, bool) \
+                    and 0 <= digits <= 20:
+                row["digits"] = digits
+        # A bounded page of a bigger catalog must be able to say so. A source
+        # that can count (a connected broker) reports how many instruments it
+        # holds in a header, so the list itself keeps the shape every client
+        # already reads. Decoration: a count that fails costs only the count.
+        count = getattr(source, "total", None)
+        if callable(count) and not query.strip():
+            try:
+                total = int(count(""))
+            except Exception:  # noqa: BLE001
+                total = None
+            if total is not None:
+                from fastapi.responses import JSONResponse  # noqa: PLC0415
+                return JSONResponse(rows,
+                                    headers={"X-Total-Count": str(total)})
+        return rows
 
     @app.get("/api/indicators")
     def indicators():
@@ -700,10 +929,17 @@ def create_app() -> FastAPI:
             for s in all_specs()
         ]
 
-    @app.get("/api/prices")
+    def _prices_terms(provider: str, request: Request):
+        # A broker whose terms keep its prices on this computer answers its
+        # own window only (SPEC 3.3), never a program that could hand them on.
+        # A dependency of the route rather than a line in it, so the route
+        # itself reads as it always did.
+        local_data_only(request, _source_broker(provider), "Prices")
+
+    @app.get("/api/prices", dependencies=[Depends(_prices_terms)])
     def prices(provider: str, symbols: str):
         """Latest price/bid/ask for up to 50 symbols from the platform price
-        board (/v1/prices). The watchlist polls this once a second instead of
+        board (/v1/prices). The watchlist uses a shared three-second budget instead of
         holding websocket subscriptions per row (plan cap: 16 concurrent)."""
         try:
             p = reg.get(provider)
@@ -718,6 +954,19 @@ def create_app() -> FastAPI:
         try:
             return fn(syms)
         except Exception as e:
+            import urllib.error
+            if isinstance(e, urllib.error.HTTPError) and e.code == 429:
+                # Preserve the quota contract instead of disguising it as an
+                # upstream outage. Consume the complete refusal before closing.
+                try:
+                    e.read()
+                finally:
+                    e.close()
+                try:
+                    retry = max(3, min(120, math.ceil(float(e.headers.get("Retry-After", "60")))))
+                except (TypeError, ValueError, OverflowError):
+                    retry = 60
+                raise HTTPException(429, "Price request limit reached", headers={"Retry-After": str(retry)})
             raise HTTPException(502, f"prices failed: {e}")
 
     @app.get("/api/screener")
@@ -761,20 +1010,33 @@ def create_app() -> FastAPI:
             return {}
 
     @app.get("/api/candles")
-    def candles(provider: str, symbol: str, timeframe: str = "1h",
+    def candles(provider: str, symbol: str, request: Request,
+                timeframe: str = "1h",
                 limit: int = 5000, indicators: str = "",
                 start: str | None = None, end: str | None = None):
+        # The chart's own fetch passes; a program asking for a
+        # data_local_only broker's bars is told why it gets none.
+        local_data_only(request, _source_broker(provider),
+                        f"{str(symbol)[:40]} candles")
+        # start/end, ISO 8601 or epoch seconds, read once here and handed to
+        # every source as the same ISO time, the form the provider contract
+        # names (the manual-backtest replay needs "history up to the session
+        # start" and windowed scrollback, not just "latest N"). Anything else
+        # is a 400 that names the forms taken.
+        from .broker_hub import window_iso, window_seconds  # noqa: PLC0415
+        try:
+            start = window_iso(window_seconds(start, "start"))
+            end = window_iso(window_seconds(end, "end"))
+        except ValueError as e:
+            raise HTTPException(400, str(e))
         try:
             p = reg.get(provider)
-            # start/end are ISO timestamps. Every provider's candles() already
-            # takes them (the manual-backtest replay needs "history up to the
-            # session start" and windowed scrollback, not just "latest N").
             df = p.candles(symbol, timeframe, limit=min(int(limit), 5000),
                            start=start, end=end)
         except ValueError as e:
             raise HTTPException(404, str(e))
         except Exception as e:
-            raise HTTPException(502, f"candles failed: {e}")
+            raise HTTPException(502, f"candles failed: {_said(_source_broker(provider), e)}")
 
         # Indicator maths runs on the USER'S machine, never ours.
         #
@@ -832,7 +1094,7 @@ def create_app() -> FastAPI:
         return {"source": TEMPLATE}
 
     @app.post("/api/user-indicators/preview")
-    def user_ind_preview(body: PreviewIn):
+    def user_ind_preview(body: PreviewIn, request: Request):
         """Run a DRAFT indicator source over real candles for the editor's
         live preview, without saving and without touching the picker.
 
@@ -844,6 +1106,10 @@ def create_app() -> FastAPI:
         exceptional one, and the editor shows it inline while keeping the
         last good drawing on screen."""
         deny_hosted()
+        own_origin_only(request)
+        # The preview answers with the candles themselves.
+        local_data_only(request, _source_broker(body.provider),
+                        f"{str(body.symbol)[:40]} candles")
         try:
             p = reg.get(body.provider)
             df = p.candles(body.symbol, body.timeframe,
@@ -851,7 +1117,8 @@ def create_app() -> FastAPI:
         except ValueError as e:
             raise HTTPException(404, str(e))
         except Exception as e:
-            raise HTTPException(502, f"candles failed: {e}")
+            raise HTTPException(502, "candles failed: "
+                                + _said(_source_broker(body.provider), e))
         if df is None or not len(df):
             return {"error": "no candles for this symbol", "candles": [],
                     "indicators": {}}
@@ -923,8 +1190,9 @@ def create_app() -> FastAPI:
         return {"file": filename, "source": source}
 
     @app.post("/api/user-indicators/{filename}")
-    def user_ind_save(filename: str, body: SourceIn):
+    def user_ind_save(filename: str, body: SourceIn, request: Request):
         deny_hosted()
+        own_origin_only(request)
         error = user_indicators.save(filename, body.source)
         return {"ok": error is None, "file": filename, "error": error,
                 "names": user_indicators.file_names.get(filename, [])}
@@ -991,6 +1259,8 @@ def create_app() -> FastAPI:
         down so a range older than the newest bars is served instead of
         being cut off by the cap (the old 2000-bar default loaded the newest
         bars, then found nothing inside an older window)."""
+        if body.provider == "lse" and body.timeframe == "tick":
+            raise ValueError("LSE tick charts are live only; choose a candle timeframe for backtesting")
         from lse_terminal.backtest.runner import _parse_when
         import datetime as _dt
         opts = body.options or {}
@@ -1011,9 +1281,15 @@ def create_app() -> FastAPI:
                                 start=start, end=end)
 
     @app.post("/api/backtest")
-    def backtest(body: BacktestIn):
+    def backtest(body: BacktestIn, request: Request):
         # Executes user Python in-process: never on a shared host.
         deny_hosted()
+        own_origin_only(request)
+        # On a data_local_only broker's bars the user's own backtest runs
+        # from the terminal's window; its trades carry the broker's prices,
+        # so a program does not get them.
+        local_data_only(request, _source_broker(body.provider),
+                        f"Backtest results on {str(body.symbol)[:40]}")
         from lse_terminal.backtest.contract import BacktestError
         try:
             engine = reg.engine(body.engine)
@@ -1023,7 +1299,8 @@ def create_app() -> FastAPI:
         try:
             candles = _backtest_candles(provider, body)
         except Exception as e:
-            raise HTTPException(502, f"candles failed: {e}")
+            raise HTTPException(502, "candles failed: "
+                                + _said(_source_broker(body.provider), e))
         try:
             result = engine.run(body.script, candles, body.symbol, body.timeframe,
                                 options=body.options,
@@ -1050,7 +1327,8 @@ def create_app() -> FastAPI:
             # hourly bars, 5-9 trades each), which is no validation at all.
             candles = _backtest_candles(provider, body)
         except Exception as e:
-            raise HTTPException(502, f"candles failed: {e}")
+            raise HTTPException(502, "candles failed: "
+                                + _said(_source_broker(body.provider), e))
         try:
             return fn(body.script, candles, options=body.options,
                       data_files=_resolve_datasets(body.datasets), **kwargs)
@@ -1058,16 +1336,22 @@ def create_app() -> FastAPI:
             raise HTTPException(400, str(e))
 
     @app.post("/api/backtest/montecarlo")
-    def backtest_montecarlo(body: MonteCarloIn):
+    def backtest_montecarlo(body: MonteCarloIn, request: Request):
         # Executes user Python in-process: never on a shared host.
         deny_hosted()
+        own_origin_only(request)
+        local_data_only(request, _source_broker(body.provider),
+                        f"Monte Carlo results on {str(body.symbol)[:40]}")
         return _quant_mode(body, "montecarlo",
                            runs=max(1, min(body.runs, 100_000)), seed=body.seed)
 
     @app.post("/api/backtest/walkforward")
-    def backtest_walkforward(body: WalkForwardIn):
+    def backtest_walkforward(body: WalkForwardIn, request: Request):
         # Executes user Python in-process: never on a shared host.
         deny_hosted()
+        own_origin_only(request)
+        local_data_only(request, _source_broker(body.provider),
+                        f"Walk-forward results on {str(body.symbol)[:40]}")
         if not body.params:
             raise HTTPException(400, "walkforward needs at least one param grid")
         return _quant_mode(body, "walkforward", params=body.params,
@@ -1268,7 +1552,11 @@ def create_app() -> FastAPI:
                 return _json.loads(r.read())
         except Exception as e:
             code = getattr(e, "code", 502)
-            raise HTTPException(code if code in (401, 403, 429) else 502,
+            if code == 410:
+                # Consume the retirement response before caching unavailable.
+                with e:
+                    e.read()
+            raise HTTPException(code if code in (401, 403, 410, 429) else 502,
                                 f"mbo request failed: {e}")
 
     @app.get("/api/mbo/status")
@@ -1287,7 +1575,7 @@ def create_app() -> FastAPI:
                 symbols[c["root"] + ".F"] = c["active_contract"]
             out = {"available": True, "symbols": symbols}
         except HTTPException as e:
-            if e.status_code not in (401, 403):
+            if e.status_code not in (401, 403, 410):
                 raise
             out = {"available": False, "symbols": {}}
         mbo_cache["status"] = (time.time(), out)
@@ -1327,20 +1615,222 @@ def create_app() -> FastAPI:
 
     ai_dir = cfg.config_dir() / "ai-workspace"
 
+    # ── the broker's terms in what the agents are given (SPEC 3.3) ────────
+    # The page sends the account and the screen map as data every turn. For a
+    # connection whose broker keeps its prices on this computer, its market
+    # data is taken out here, before anything is written where an agent reads,
+    # and the sentence saying why goes in its place: never a silent gap. The
+    # page does the same before it builds the hosted assistant's context; this
+    # is the engine's own copy of the rule, for the files.
+    # What stays of an account and its positions: the account's own records
+    # (SPEC 3.3), by the protocol's names and the page's (sl_price, tp_price,
+    # name, leverage, starting_balance). Every other field is set to null:
+    # the prices, and every figure marked to them (a position's unrealised
+    # P/L, the account's equity, open P/L and margin), which with the size
+    # and the entry price give the price back. A field the page adds later
+    # is withheld until it is named here.
+    from .broker_hub import (ACCOUNT_RECORD_FIELDS, MARKED_TO_PRICE,  # noqa: PLC0415
+                             POSITION_RECORD_FIELDS)
+    _ACCOUNT_KEEP = ACCOUNT_RECORD_FIELDS | {"name", "leverage",
+                                             "starting_balance", "positions",
+                                             "broker", "error", "note"}
+    _POSITION_KEEP = POSITION_RECORD_FIELDS | {"sl_price", "tp_price"}
+
+    def _dock_broker(terminal) -> str | None:
+        """Which connection the account dock shows, from the screen map:
+        a profile name, "lse-hosted" for the hosted sim, None when unsaid."""
+        try:
+            for r in (terminal or {}).get("regions") or []:
+                if isinstance(r, dict) and r.get("id") == "acct-dock":
+                    b = (r.get("data") or {}).get("broker")
+                    return b if isinstance(b, str) and b else None
+        except Exception:  # noqa: BLE001 - a malformed map says nothing
+            pass
+        return None
+
+    # What a position says when its stop's level is held back: the broker
+    # moves a trailed stop from the price, and a null stop reads as none.
+    TRAILED_STOP = "The level of a stop the broker trails"
+
+    def _withhold_account(acct, why: str, trail_why: str | None = None):
+        if not isinstance(acct, dict):
+            return acct
+        out = {k: (v if k in _ACCOUNT_KEEP else None) for k, v in acct.items()}
+        # Positions only as the page sent them: a failed snapshot ({error,
+        # note}) stays one, not an empty book.
+        if not isinstance(acct.get("positions"), list):
+            if "positions" in acct:
+                out["positions"] = None
+            out["prices_withheld"] = why
+            return out
+        poss = []
+        for p in acct["positions"]:
+            if isinstance(p, dict):
+                p = {k: (v if k in _POSITION_KEEP else None)
+                     for k, v in p.items()}
+                # A stop the broker trails moves with the price: its level is
+                # withheld, and the position says so, since a null stop
+                # otherwise reads as no stop at all. The distance stays.
+                if p.get("trail_points"):
+                    for k in ("sl", "sl_price"):
+                        if k in p:
+                            p[k] = None
+                    p["withheld"] = trail_why or why
+            poss.append(p)
+        out["positions"] = poss
+        out["prices_withheld"] = why
+        return out
+
+    def _local_live() -> list:
+        """The live connections whose broker keeps its prices here."""
+        return [b for b, t in hub.connected_terms() if t.get("data_local_only")]
+
+    def _withhold_context(provider, account, terminal) -> tuple:
+        """(account, terminal, sentences): the page's account and screen map
+        with each data_local_only connection's market data replaced by its
+        sentence, and the order door closed for an orders_by_hand_only one
+        that is not paper."""
+        said = []
+        dock = _dock_broker(terminal)
+        dock_why = hand_why = trail_why = None
+        if dock is None:
+            # The map cannot say which account the dock shows; while a
+            # data_local_only connection is live, the careful reading is
+            # that it may be that one.
+            local = _local_live()
+            if local:
+                dock_why = hub.withheld(local[0], MARKED_TO_PRICE)
+                trail_why = _withheld_words(local[0], TRAILED_STOP)
+        elif dock != "lse-hosted":
+            dock_why = _local_refusal(dock, MARKED_TO_PRICE)
+            if dock_why:
+                trail_why = _withheld_words(dock, TRAILED_STOP)
+            try:
+                if hub.by_hand(dock):
+                    hand_why = hub.by_hand_refusal(dock)
+            except Exception:  # noqa: BLE001 - unreadable: the careful answer
+                hand_why = hub.by_hand_refusal(dock)
+        chart_why = _local_refusal(_source_broker(provider), "Chart prices")
+        if dock_why:
+            account = _withhold_account(account, dock_why, trail_why)
+            said.append(dock_why)
+        if isinstance(terminal, dict) and (chart_why or dock_why or hand_why):
+            terminal = dict(terminal)
+            regions = []
+            for r in terminal.get("regions") or []:
+                if isinstance(r, dict):
+                    r = dict(r)
+                    data = r.get("data")
+                    if (r.get("id") == "chart-wrap" and chart_why
+                            and isinstance(data, dict)):
+                        data = dict(data)
+                        for k in ("last_close", "bid", "ask"):
+                            if k in data:
+                                data[k] = None
+                        data["prices_withheld"] = chart_why
+                        r["data"] = data
+                    elif (r.get("id") == "acct-dock" and dock_why
+                            and isinstance(data, dict)):
+                        data = dict(data)
+                        data["account"] = _withhold_account(
+                            data.get("account"), dock_why, trail_why)
+                        r["data"] = data
+                    elif r.get("id") == "trade-panel" and hand_why:
+                        r["more"] = [hand_why]
+                regions.append(r)
+            terminal["regions"] = regions
+        if chart_why:
+            said.append(chart_why)
+        if hand_why:
+            said.append(hand_why)
+        return account, terminal, list(dict.fromkeys(said))
+
+    def _screen_withheld(ctx=None) -> str | None:
+        """The sentence the screenshot is withheld with, or None.
+
+        Withheld while a live data_local_only connection's prices may be on
+        screen: it is the chart's source, or the account dock's broker, or
+        the last context does not say what is on screen (the shell's first
+        snapshot at boot, a map that failed to build).
+        """
+        local = _local_live()
+        if not local:
+            return None
+        if ctx is None:
+            try:
+                ctx = json.loads((ai_dir / "context.json").read_text())
+            except (OSError, ValueError):
+                ctx = None
+        if not isinstance(ctx, dict):
+            return hub.withheld(local[0], "Screenshot")
+        dock = _dock_broker(ctx.get("terminal"))
+        if dock is None:
+            return hub.withheld(local[0], "Screenshot")
+        shown = {dock, _source_broker(ctx.get("provider"))}
+        for b in local:
+            if b in shown:
+                return hub.withheld(b, "Screenshot")
+        return None
+
+    def _drop_screenshot() -> None:
+        for n in ("chart.png", "chart.png.tmp"):
+            try:
+                (ai_dir / n).unlink()
+            except OSError:
+                pass
+
+    def _terms_brief() -> str:
+        """The brief's section on the live connections' terms, or ""."""
+        lines = []
+        for b, t in hub.connected_terms():
+            if not (t.get("data_local_only") or t.get("by_hand")):
+                continue
+            line = f"- {hub.terms_name(b)} (connection `{b}`): {t.get('said') or ''}"
+            if t.get("data_local_only"):
+                line += (" Its prices (quotes, bars, the current price of its "
+                         "positions) stay on this computer, and so do the "
+                         "figures worked from them (open P/L, equity, "
+                         "margin): get_candles, the backtest tools and the "
+                         "engine's price routes refuse them, get_positions "
+                         "and context.json leave them out, and there is no "
+                         "screenshot while they are on screen. Say so when "
+                         "asked; do not look for another way to get them.")
+            if t.get("by_hand"):
+                line += (" On this live account the user places every order "
+                         "in the terminal's own window (the ticket, the "
+                         "positions, the chart): the engine refuses an order, "
+                         "close, change or cancel that you send.")
+            lines.append(line)
+        if not lines:
+            return ""
+        return "## A broker's terms\n" + "\n".join(lines) + "\n\n"
+
     def _ai_write_workspace(body: AiWorkspaceIn, host: str) -> None:
         from lse_terminal.backtest.runner import TEMPLATE
         ai_dir.mkdir(parents=True, exist_ok=True)
         (ai_dir / "strategy.py").write_text(body.script or "")
         import json as _json
-        (ai_dir / "context.json").write_text(_json.dumps({
+        account, terminal, withheld = _withhold_context(
+            body.provider, body.account, body.terminal)
+        shot = _screen_withheld({"provider": body.provider,
+                                 "terminal": body.terminal})
+        if shot:
+            _drop_screenshot()
+            withheld.append(shot)
+        ctx_doc = {
             "engine_url": f"http://{host}",
             "provider": body.provider, "symbol": body.symbol,
             "timeframe": body.timeframe,
             "open_file": body.open_file,
             "view": body.view,
-            "account": body.account,
-            "terminal": body.terminal,
-        }, indent=2) + "\n")
+            "account": account,
+            "terminal": terminal,
+        }
+        if withheld:
+            # What was left out and why, in the broker's terms' own words.
+            ctx_doc["withheld"] = withheld
+        (ai_dir / "context.json").write_text(
+            _json.dumps(ctx_doc, indent=2) + "\n")
         # The runner Claude uses to close its own loop: edit strategy.py,
         # run this, read the stats. Plain stdlib so it works on any Python.
         (ai_dir / "backtest.py").write_text(
@@ -1622,6 +2112,9 @@ def create_app() -> FastAPI:
             "Minimal working strategy (plain Python):\n\n"
             "```python\n" + TEMPLATE + "```\n"
         )
+        # What a connected broker's terms take away from the agent, and why,
+        # so a refusal it meets is one it was told about (SPEC 3.3).
+        brief += _terms_brief()
         # USER.md is the ONE hand-editable file here (via the rail's settings
         # panel): it persists across regenerations and its content is appended
         # to every generated context file, so custom instructions reach the
@@ -1654,6 +2147,19 @@ def create_app() -> FastAPI:
         deny_hosted()
         _ai_write_workspace(body, request.headers.get("host", "127.0.0.1:7788"))
         return {"ok": True, "path": str(ai_dir)}
+
+    @app.get("/api/ai/capture-allowed")
+    def ai_capture_allowed():
+        """Asked by the desktop shell before it writes a screenshot into the
+        agent workspace (desktop/main.js): not while a live connection whose
+        broker keeps its prices on this computer may be on screen, and then
+        with the sentence that says why (SPEC 3.3)."""
+        deny_hosted()
+        why = _screen_withheld()
+        if why:
+            _drop_screenshot()
+            return {"allowed": False, "reason": why}
+        return {"allowed": True}
 
     @app.get("/api/ai/strategy")
     def ai_strategy():
@@ -1821,6 +2327,8 @@ def create_app() -> FastAPI:
         await websocket.accept()
         if await deny_hosted_ws(websocket):
             return
+        if await deny_other_origin_ws(websocket):
+            return
         agent = websocket.query_params.get("agent", "")
         spec = AI_AGENTS.get(agent) or {}
         argv = spec.get("install_argv")
@@ -1866,6 +2374,10 @@ def create_app() -> FastAPI:
                     break
             rc = await proc.wait()
             _authed_cache.clear()
+            if rc == 0:
+                # What the terminal installed for the user, it keeps current,
+                # unless they have already said otherwise.
+                _set_auto_update(agent, True, only_if_unset=True)
             try:
                 if rc == 0:
                     await websocket.send_json({"type": "ok"})
@@ -1907,6 +2419,8 @@ def create_app() -> FastAPI:
     async def ai_login(websocket: WebSocket):
         await websocket.accept()
         if await deny_hosted_ws(websocket):
+            return
+        if await deny_other_origin_ws(websocket):
             return
         agent = websocket.query_params.get("agent", "claude")
         if hosted or agent not in AI_AGENTS or agent not in AI_LOGIN:
@@ -2544,10 +3058,152 @@ def create_app() -> FastAPI:
                 # back-compat with the first cut of the panel
                 "claude": agents.get("claude", False)}
 
+    # ── The model menu, asked of the user's own CLI ───────────────────
+    # The page used to carry a typed list of models, which aged between
+    # builds: new models were missing and a withdrawn one stayed as a row
+    # that failed. Each CLI knows what its account can run, so the menu asks
+    # it (agent_models.py). The CLI is started exactly as a chat turn starts
+    # it: same executable, same environment, same account arguments, so the
+    # list is the one the next turn will be held to.
+    # The answer is kept beside the sign-in probes in _authed_cache, so every
+    # place that already clears those (sign in, sign out, a key saved or
+    # removed) also drops a list that belonged to the previous account.
+    _MODELS_TTL_OK = 60     # a `claude update` shows within a minute
+    _MODELS_TTL_FAIL = 15   # do not hammer a CLI that cannot answer
+
+    @app.get("/api/ai/models")
+    def ai_models(request: Request, agent: str = "", refresh: int = 0):
+        deny_hosted()
+        own_origin_only(request)  # starts a program as the user
+        if agent not in AI_AGENTS:
+            raise HTTPException(404, "unknown agent")
+        cached = _authed_cache.get("models:" + agent)
+        if cached and not refresh:
+            ttl = _MODELS_TTL_OK if cached[1].get("ok") else _MODELS_TTL_FAIL
+            if time.time() - cached[0] < ttl:
+                return _with_update_state(agent, cached[1])
+        import shutil
+        from . import agent_models
+        agent_bin = shutil.which(AI_AGENTS[agent]["binary"])
+        if not agent_bin:
+            out = {"ok": False, "agent": agent, "source": "", "models": [],
+                   "unavailable": [], "error": "not installed"}
+        else:
+            argv = _direct_argv([agent_bin])
+            if argv[0].lower().endswith((".cmd", ".bat")):
+                argv = ["cmd.exe", "/c"] + argv
+            env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1",
+                   **_ai_env_extra(agent)}
+            out = agent_models.list_models(
+                agent, argv, env=env, cwd=str(Path.home()),
+                account_args=_claude_key_args() if agent == "claude" else ())
+        out["fetched_at"] = int(time.time())
+        _authed_cache["models:" + agent] = (time.time(), out)
+        return _with_update_state(agent, out)
+
+    # ── Keeping the user's CLI current ────────────────────────────────
+    # A CLI lists only the models it knows, so a CLI that is behind is why
+    # a user cannot pick the newest model. The terminal runs the CLI's own
+    # updater for them (agent_models.update_cli):
+    # - asked: the user's click on the menu row, or /update. It also turns
+    #   on keeping that CLI current (ai_auto_update in config.json).
+    # - not asked: the page's automatic update when the CLI is behind,
+    #   allowed only where that is on. The Install button turns it on for
+    #   what it installs; otherwise the user's first update does.
+    # The program is the user's own and is used outside this app too, so
+    # nothing here runs before one of those two.
+    # Never while that provider is answering (the turn would be running the
+    # program being replaced), one update at a time, and a failed or
+    # unmoved update is remembered for this launch so the page does not
+    # try the same version again by itself.
+    import threading as _threading_cli
+    _cli_update_lock = _threading_cli.Lock()
+    _cli_updating = {}   # agent -> True while its updater runs
+    _cli_turns = {}      # agent -> chat turns running now
+    _cli_tried = {}      # agent -> newest version an update did not reach
+    app.state.ai_cli_turns = _cli_turns
+
+    def _auto_update(agent):
+        value = (cfg.load().get("ai_auto_update") or {}).get(agent)
+        return value if isinstance(value, bool) else None
+
+    def _set_auto_update(agent, value, only_if_unset=False):
+        conf = cfg.load()
+        chosen = conf.get("ai_auto_update")
+        chosen = dict(chosen) if isinstance(chosen, dict) else {}
+        if only_if_unset and isinstance(chosen.get(agent), bool):
+            return
+        chosen[agent] = bool(value)
+        conf["ai_auto_update"] = chosen
+        cfg.save(conf)
+
+    def _with_update_state(agent, out):
+        # Added per request, not kept with the list: the setting and the
+        # last attempt can change while the list is still fresh.
+        if not isinstance(out.get("cli"), dict):
+            return out
+        return {**out, "cli": {**out["cli"],
+                               "auto": _auto_update(agent),
+                               "tried": _cli_tried.get(agent, ""),
+                               "updating": bool(_cli_updating.get(agent))}}
+
+    @app.post("/api/ai/auto-update")
+    def ai_auto_update_set(body: AiAutoUpdateIn, request: Request):
+        deny_hosted()
+        own_origin_only(request)
+        if body.agent not in AI_AGENTS:
+            raise HTTPException(404, "unknown agent")
+        _set_auto_update(body.agent, body.enabled)
+        return {"ok": True, "agent": body.agent, "auto": _auto_update(body.agent)}
+
+    @app.post("/api/ai/update")
+    def ai_update(body: AiUpdateIn, request: Request):
+        deny_hosted()
+        own_origin_only(request)  # runs a program as the user
+        from . import agent_models
+        agent = body.agent
+        if agent not in AI_AGENTS or agent not in agent_models.CLI:
+            raise HTTPException(404, "unknown agent")
+        if not body.asked and _auto_update(agent) is not True:
+            raise HTTPException(403, "automatic updates are not turned on "
+                                     "for this provider")
+        import shutil
+        agent_bin = shutil.which(AI_AGENTS[agent]["binary"])
+        if not agent_bin:
+            raise HTTPException(400, "not installed")
+        if _cli_turns.get(agent, 0) > 0:
+            raise HTTPException(409, "a message is being answered; update "
+                                     "when it has finished")
+        if not _cli_update_lock.acquire(blocking=False):
+            raise HTTPException(409, "an update is already running")
+        argv = _direct_argv([agent_bin])
+        if argv[0].lower().endswith((".cmd", ".bat")):
+            argv = ["cmd.exe", "/c"] + argv
+        env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1"}
+        try:
+            _cli_updating[agent] = True
+            result = agent_models.update_cli(agent, argv, env=env,
+                                             cwd=str(Path.home()))
+        finally:
+            _cli_updating.pop(agent, None)
+            _cli_update_lock.release()
+        _authed_cache.clear()  # the list belonged to the old version
+        state = agent_models.cli_state(agent, argv, env=env, cwd=str(Path.home()))
+        if state.get("outdated") or not result["ok"]:
+            _cli_tried[agent] = state.get("latest") or result["after"] or "?"
+        else:
+            _cli_tried.pop(agent, None)
+        if body.asked and result["ok"]:
+            _set_auto_update(agent, True)
+        return {**result, "agent": agent,
+                "cli": _with_update_state(agent, {"cli": state})["cli"]}
+
     @app.websocket("/api/ai/pty")
     async def ai_pty(websocket: WebSocket):
         await websocket.accept()
         if await deny_hosted_ws(websocket):
+            return
+        if await deny_other_origin_ws(websocket):
             return
         agent = websocket.query_params.get("agent", "claude")
         if agent not in AI_AGENTS:
@@ -2703,7 +3359,12 @@ def create_app() -> FastAPI:
     # turn so any turn can be reverted, VS Code checkpoint style. Plain file
     # copies, not git: user machines cannot be assumed to have git, and the
     # workspace is a handful of small files. chart.png / pasted images are
-    # ephemera and excluded.
+    # ephemera and excluded. So is context.json: the page's state, written
+    # again before every turn, so a revert has nothing to restore from it,
+    # and it carries the screen's prices, which a broker's terms can keep off
+    # any copy an agent reads (SPEC 3.3).
+    _NOT_CHECKPOINTED = ("chart.png", "context.json")
+
     def _checkpoint_make() -> str:
         import shutil as _sh
         import uuid as _uuid
@@ -2711,9 +3372,15 @@ def create_app() -> FastAPI:
         root = ai_dir / ".checkpoints"
         dst = root / cid
         dst.mkdir(parents=True, exist_ok=True)
+        # A checkpoint made by a build from before that rule may hold one.
+        for old in root.iterdir():
+            try:
+                (old / "context.json").unlink()
+            except OSError:
+                pass
         for f in ai_dir.iterdir():
             if (f.is_file() and f.stat().st_size <= 1024 * 1024
-                    and f.name != "chart.png"
+                    and f.name not in _NOT_CHECKPOINTED
                     and not f.name.startswith("pasted-")):
                 _sh.copy2(f, dst / f.name)
         # The agents' real edits land in the STRATEGY workspace, so a revert
@@ -2741,7 +3408,7 @@ def create_app() -> FastAPI:
             raise HTTPException(404, "checkpoint not found")
         restored = []
         for f in sorted(src.iterdir()):
-            if f.is_file():
+            if f.is_file() and f.name not in _NOT_CHECKPOINTED:
                 _sh.copy2(f, ai_dir / f.name)
                 restored.append(f.name)
         # Strategy-workspace files ride under ws/ (see _checkpoint_make).
@@ -2908,6 +3575,7 @@ def create_app() -> FastAPI:
     @app.post("/api/ai/tool-run")
     def ai_tool_run(body: AiToolRunIn, request: Request):
         deny_hosted()
+        own_origin_only(request)
         if body.token not in approve_channels:
             raise HTTPException(403, "no active chat session for this token")
         return _plain(_tool_dispatch(body.name, body.args or {},
@@ -3181,6 +3849,14 @@ def create_app() -> FastAPI:
             connected = [r for r in rows if r.get("connected")]
             for row in connected:
                 slug = row["broker"]
+                # A broker whose terms keep its prices on this computer
+                # (SPEC 3.3): the account's own records are reported (its
+                # balance, the sizes, sides and entry prices of its
+                # positions); the current prices are market data, and so are
+                # the figures marked to them (unrealised P/L, equity,
+                # margin), which give them back, so none is; the entry says
+                # so in one sentence.
+                local = _local_refusal(slug, MARKED_TO_PRICE)
                 try:
                     acct = _json.loads(_rq.urlopen(
                         base + "/api/broker/account?broker="
@@ -3191,11 +3867,35 @@ def create_app() -> FastAPI:
                     # The broker's own quote cache prices its positions
                     # (broker symbols are the broker's spellings; /api/prices
                     # has never heard of them). Closing side, like the dock.
-                    quotes = _json.loads(_rq.urlopen(
+                    quotes = {} if local else _json.loads(_rq.urlopen(
                         base + "/api/broker/quotes?broker="
                         + _up.quote(slug), timeout=30).read())
                 except Exception as e:  # noqa: BLE001 - report, don't die
                     accounts.append({"broker": slug, "error": str(e)})
+                    continue
+                if local:
+                    from .broker_hub import (  # noqa: PLC0415
+                        account_record_only, record_only)
+                    # Each position keeps the sentence naming what it lost
+                    # (the route gives one; a trailed stop is among them).
+                    recs = []
+                    for p in poss:
+                        kept, dropped = record_only(p)
+                        dropped = [d for d in dropped if d != "withheld"]
+                        why = ((p.get("withheld") if isinstance(p, dict)
+                                else None)
+                               or (hub.withheld(slug, ", ".join(dropped))
+                                   if dropped else None))
+                        kept["price"] = None
+                        if why:
+                            kept["withheld"] = why
+                        recs.append(kept)
+                    poss = recs
+                    accounts.append({"broker": slug,
+                                     "label": row.get("label") or slug,
+                                     "account": account_record_only(acct)[0],
+                                     "positions": poss,
+                                     "prices_withheld": local})
                     continue
                 for pos in poss:
                     q = quotes.get(pos.get("symbol")) or {}
@@ -3269,13 +3969,54 @@ def create_app() -> FastAPI:
         if name == "get_candles":
             import urllib.parse as _up
             import urllib.request as _rq
+            prov = args.get("provider") or ctx.get("provider") or "lse"
+            sym = args.get("symbol") or ctx.get("symbol") or ""
+            # Refused, and said why, for a broker whose terms keep its
+            # prices on this computer: the chart shows them, a model does not
+            # get them (SPEC 3.3).
+            why = _local_refusal(_source_broker(prov), f"{str(sym)[:40]} candles")
+            if why:
+                raise HTTPException(403, why)
             q = _up.urlencode({
-                "provider": args.get("provider") or ctx.get("provider") or "lse",
-                "symbol": args.get("symbol") or ctx.get("symbol") or "",
+                "provider": prov,
+                "symbol": sym,
                 "timeframe": args.get("timeframe") or ctx.get("timeframe") or "1h",
                 "limit": min(int(args.get("limit") or 200), 500)})
             url = ctx.get("engine_url", "http://127.0.0.1:7799") + "/api/candles?" + q
-            return _rq.urlopen(url, timeout=60).read().decode("utf-8", "replace")
+            try:
+                with _rq.urlopen(url, timeout=60) as response:
+                    data = _json.loads(response.read())
+                # Tool readers need explicit UTC dates, not mental epoch
+                # arithmetic. Keep the chart API's original candle arrays.
+                from datetime import datetime, timezone
+                import re as _candle_re
+                now = time.time()
+                timeframe = str(data.get("timeframe") or
+                                args.get("timeframe") or "1h")
+                match = _candle_re.fullmatch(r"([1-9][0-9]*)([smhdw])", timeframe)
+                width = (int(match[1]) * {"s": 1, "m": 60, "h": 3600,
+                         "d": 86400, "w": 604800}[match[2]]) if match else None
+                utc = lambda ts: datetime.fromtimestamp(ts, timezone.utc).isoformat().replace("+00:00", "Z")
+                rows = [{"timestamp_utc": utc(row[0]),
+                         "open": row[1], "high": row[2], "low": row[3],
+                         "close": row[4], "volume": row[5],
+                         "completed": row[0] + width <= now if width else None}
+                        for row in data.get("candles", [])]
+                data["as_of_utc"] = utc(now)
+                data["candles_utc"] = rows
+                data["latest_completed_candle"] = next(
+                    (row for row in reversed(rows) if row["completed"]), None)
+                return _json.dumps(data)
+            except _rq.HTTPError as exc:
+                # Keep the local candle handler's useful error, not request
+                # headers or a key-bearing upstream URL. Bound unexpected bodies.
+                body = exc.read(2048).decode("utf-8", "replace")
+                try:
+                    detail = _json.loads(body).get("detail", body)
+                except (ValueError, AttributeError):
+                    detail = body
+                raise HTTPException(exc.code, str(detail)[:2048] or
+                                    "Candle request failed") from None
         if name == "list_ml_models":
             payload = {
                 "models": [{k: m.get(k) for k in
@@ -3366,6 +4107,13 @@ def create_app() -> FastAPI:
                        or pin.get("timeframe")
                        or ctx.get("timeframe") or "1h",
                        "script": script, "limit": 0, "options": options}
+            # A backtest on a data_local_only broker's bars runs in the
+            # terminal's own BACKTEST; its results carry the broker's prices,
+            # so they are not handed to a model (SPEC 3.3).
+            why = _local_refusal(_source_broker(payload["provider"]),
+                                 f"Backtest results on {str(payload['symbol'])[:40]}")
+            if why:
+                raise HTTPException(403, why)
             req = _rq.Request(
                 ctx.get("engine_url", "http://127.0.0.1:7799") + "/api/backtest",
                 _json.dumps(payload).encode(), {"Content-Type": "application/json"})
@@ -3430,6 +4178,12 @@ def create_app() -> FastAPI:
                        # combo guard below keeps the CPU bill bounded.
                        "limit": min(int(args.get("bars") or 2000), 100_000),
                        "options": options}
+            why = _local_refusal(
+                _source_broker(payload["provider"]),
+                ("Monte Carlo" if name == "run_montecarlo" else "Walk-forward")
+                + f" results on {str(payload['symbol'])[:40]}")
+            if why:
+                raise HTTPException(403, why)
             if name == "run_montecarlo":
                 path = "/api/backtest/montecarlo"
                 payload.update(runs=min(int(args.get("runs") or 1000), 100_000),
@@ -3496,8 +4250,8 @@ def create_app() -> FastAPI:
                                     + ((detail or b"").decode("utf-8", "replace")[:300]
                                        or str(e)))
         if name == "import_lse_data":
-            # The databank import modal as a tool: submit the export job,
-            # then wait a bounded while. Deep tick pulls outlive the wait;
+            # The databank import modal as a tool: submit the paged import,
+            # then wait a bounded while. Long histories outlive the wait;
             # the job_id comes back so a later call can finish the check.
             import urllib.request as _rq
             port = ctx.get("engine_url", "http://127.0.0.1:7799")
@@ -3725,6 +4479,7 @@ def create_app() -> FastAPI:
     @app.post("/mcp")
     async def mcp_http(request: Request):
         deny_hosted()
+        own_origin_only(request)
         from fastapi import Response
         from fastapi.concurrency import run_in_threadpool
         from fastapi.responses import JSONResponse
@@ -3764,7 +4519,31 @@ def create_app() -> FastAPI:
         v = cfg.load().get("ai_always_allow")
         return v if isinstance(v, list) else []
 
+    # Words of a command that would place, change, cancel or close an order
+    # through the engine, arm a connection, or trade beside it with the kit's
+    # own runner or connector.
+    _TRADING_WORDS = ("/api/broker/order", "/api/broker/close",
+                      "/api/broker/modify", "/api/broker/arm",
+                      "live_driver", "brueconnect")
+
+    def _hand_live() -> bool:
+        """True while a live connection's broker has every order on a live
+        account placed by the user (SPEC 3.3)."""
+        try:
+            return any(hub.by_hand(b) for b, c in list(hub.conns.items())
+                       if getattr(c, "alive", False))
+        except Exception:  # noqa: BLE001 - cannot tell: the careful answer
+            return True
+
     def _always_matches(tool: str, tool_input: dict) -> bool:
+        # An "always allow" never covers an order while such a connection is
+        # live: the card is shown every time. (The engine refuses such an
+        # order from a program anyway; this keeps the user's earlier "always"
+        # from waving one through unseen.)
+        if (tool == "Bash" and _hand_live()
+                and any(w in str((tool_input or {}).get("command", ""))
+                        for w in _TRADING_WORDS)):
+            return False
         for r in _always_rules():
             if r.get("tool") != tool:
                 continue
@@ -3925,6 +4704,8 @@ def create_app() -> FastAPI:
         await websocket.accept()
         if await deny_hosted_ws(websocket):
             return
+        if await deny_other_origin_ws(websocket):
+            return
         agent = websocket.query_params.get("agent", "claude")
         if agent not in AI_AGENTS:
             agent = "claude"
@@ -3981,7 +4762,11 @@ def create_app() -> FastAPI:
             # Two servers from the same bridge binary: the approval prompt
             # tool, and the terminal's own capabilities (Phase 5) so the
             # agent runs backtests / reads data as clean native tool calls.
-            mcp_cfg_path.write_text(_json.dumps({"mcpServers": {
+            # Written whole or not at all: a temporary file beside it (named
+            # so no reader of approve-*.json finds it), synced, then renamed
+            # into place, so whoever reads it the moment it appears reads it
+            # all. The owner's alone (mode 0600): it carries the engine token.
+            _write_whole(mcp_cfg_path, _json.dumps({"mcpServers": {
                 "lse_approver": {"command": bridge_cmd, "args": base_args},
                 "lse_terminal": {"command": bridge_cmd,
                                  "args": base_args + ["--bridge-role", "tools"]},
@@ -4110,7 +4895,13 @@ def create_app() -> FastAPI:
             parts = []
             if view:
                 parts.append(f"the user is on {view}")
-            if png.exists():
+            # A broker's terms can keep its prices off any picture an agent
+            # is given (SPEC 3.3): the file goes, and the turn says why.
+            shot = _screen_withheld()
+            if shot:
+                _drop_screenshot()
+                parts.append(shot)
+            elif png.exists():
                 age = int(time.time() - png.stat().st_mtime)
                 parts.append(
                     f"a screenshot of their window is at {png} "
@@ -4244,6 +5035,13 @@ def create_app() -> FastAPI:
             # their spinner/ANSI dressing; whatever remains is stripped.
             env = {**os.environ, "TERM": "dumb", "NO_COLOR": "1",
                    **_ai_env_extra(agent)}
+            # The CLI's own updater may be replacing the program this very
+            # moment (ai_update, a few seconds): wait for it rather than
+            # start a half-replaced program.
+            waited = 0.0
+            while _cli_updating.get(agent) and waited < 320:
+                await asyncio.sleep(0.25)
+                waited += 0.25
             try:
                 proc = await asyncio.create_subprocess_exec(
                     *argv, cwd=str(Path.home()),
@@ -4333,8 +5131,14 @@ def create_app() -> FastAPI:
                     level = str(msg.get("autonomy", "")).strip()
                     if level in ("ask", "edits", "full"):
                         state["autonomy"] = level
+                    # Counted from here, so ai_update refuses to replace
+                    # the CLI under a turn that is about to start it.
+                    _cli_turns[agent] = _cli_turns.get(agent, 0) + 1
                     state["task"] = asyncio.create_task(
                         run_turn(text[:20000], model, effort))
+                    state["task"].add_done_callback(
+                        lambda _t, a=agent: _cli_turns.__setitem__(
+                            a, max(0, _cli_turns.get(a, 0) - 1)))
                 elif msg.get("type") == "permission_reply":
                     ch = approve_channels.get(approve_token) or {"pending": {}}
                     fut = ch["pending"].get(str(msg.get("pid", "")))
@@ -4484,10 +5288,11 @@ def create_app() -> FastAPI:
                 "packages_dir": ml_env.packages_dir_str()}
 
     @app.post("/api/ml/train")
-    def ml_train(body: MLTrainIn):
+    def ml_train(body: MLTrainIn, request: Request):
         # Training spawns subprocesses and writes weights to disk, so it is a
         # single-user action, never a shared hosted-server one.
         deny_hosted()
+        own_origin_only(request)
         model = ml_catalog.get_model(body.model_key)
         if model is None:
             raise HTTPException(404, f"unknown model: {body.model_key}")
@@ -4701,6 +5506,9 @@ def create_app() -> FastAPI:
                                        "message": "The terminal only runs in the local app."})
             await websocket.close()
             return
+        # a shell on this machine: only for the terminal's own window
+        if await deny_other_origin_ws(websocket):
+            return
         mode = websocket.query_params.get("mode", "python")
         try:
             argv = _term_argv(mode, websocket.query_params.get("path", ""))
@@ -4851,10 +5659,11 @@ def create_app() -> FastAPI:
             raise HTTPException(404, str(e))
 
     @app.post("/api/ml/run-code")
-    def ml_run_code(body: MLCodeIn):
+    def ml_run_code(body: MLCodeIn, request: Request):
         # Blueprints are user Python executed locally, same trust model as
         # custom indicators; never on a shared hosted server.
         deny_hosted()
+        own_origin_only(request)
         if not body.code.strip():
             raise HTTPException(400, "empty blueprint")
         if ml_jobs.running_count() >= 2:
@@ -4938,6 +5747,8 @@ def create_app() -> FastAPI:
         this can never install something arbitrary."""
         await websocket.accept()
         if await deny_hosted_ws(websocket):
+            return
+        if await deny_other_origin_ws(websocket):
             return
         if hosted:
             await websocket.send_json({"type": "error",
@@ -5176,14 +5987,9 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     # ── LSE databank imports ─────────────────────────────────────────────────
-    # "LSE" in the library toolbar: browse the vault catalog (every instrument
-    # we record, full history), pick, and the engine pulls it as Parquet via
-    # the lse-data SDK, then lands it in the library like any local upload.
-    # Pulls run in a thread: the SDK's submit/poll/download is blocking by
-    # design (the vault builds the file server side), and a deep tick pull is
-    # minutes-long. Job state is in-memory only; the terminal is single-user
-    # and a restart mid-pull just means pressing Download again (the vault
-    # job cache makes the retry cheap server side).
+    # The library imports supported public candles and series in bounded pages.
+    # Only complete, validated downloads become local files and manifest rows.
+    # The modal and assistant share this asynchronous job interface.
 
     lsebank_jobs: dict[str, dict] = {}
 
@@ -5214,8 +6020,10 @@ def create_app() -> FastAPI:
     def lsebank_overview():
         c = _lse_bank()
         try:
-            meta = c.vault_meta()
-            reference = c.reference()
+            from lse_terminal.engine.lse_import import import_meta
+            from lse_terminal.providers import userdata
+            meta = import_meta(c.vault_meta(), userdata)
+            reference = []
         except Exception as e:
             raise _databank_http_error(e)
         # Quota is a nice-to-have (no public SDK wrapper yet): the modal shows
@@ -5252,92 +6060,14 @@ def create_app() -> FastAPI:
     @app.post("/api/lse/databank/import")
     def lsebank_import(body: LseBankImportIn):
         deny_hosted()
-        import threading
-        import uuid as _uuid
         from lse_terminal.providers import userdata
-        c = _lse_bank()
-        dataset = body.dataset.strip()
-        if not dataset:
-            raise HTTPException(400, "dataset required")
-        job_id = _uuid.uuid4().hex[:12]
-        job = {"id": job_id, "status": "exporting",
-               "detail": "the vault is building your file",
-               "dataset": dataset, "symbol": body.symbol}
-        lsebank_jobs[job_id] = job
-        # Display name from the (SDK-cached) catalog so the library row reads
-        # "Bitcoin", not just the ticker. Best-effort: a miss keeps the symbol.
-        disp = ""
+        from lse_terminal.engine import lse_import
         try:
-            disp = next((str(r.get("name") or "") for r in c.datasets(dataset)
-                         if r.get("symbol") == body.symbol), "")
-        except Exception:
-            pass
-
-        def run():
-            dl_dir = userdata.data_dir() / "lse"
-            path = None
-            try:
-                kwargs = dict(start=body.start or None, end=body.end or None,
-                              dest=str(dl_dir), dataframe=False)
-                if body.symbol:
-                    path = c.history(body.symbol, dataset=dataset,
-                                     timeframe=body.timeframe or "tick", **kwargs)
-                else:
-                    path = c.dataset(dataset, **kwargs)
-                size = os.path.getsize(path)
-                job.update(status="importing", bytes=size,
-                           detail="download done, importing to the library")
-                # Library storage models ohlcv + single-symbol numeric series
-                # only, and its normalizer dedups on whole-second timestamps
-                # and drops text columns. That is exactly right for candle and
-                # macro pulls and silently destructive for everything else
-                # (tick tapes collapse to one row per second, option exports
-                # interleave many contracts, reference tables are relational).
-                # So: candles and series import; the rest stays Parquet.
-                meta = c.vault_meta()
-                candleish = set(meta.get("candle_classes") or []) | \
-                    set(meta.get("synth_candle_classes") or [])
-                importable = bool(body.symbol) and dataset != "options" and (
-                    (body.timeframe not in ("", "tick") and dataset in candleish)
-                    or dataset in set(meta.get("series_classes") or []))
-                if not importable:
-                    raise userdata.ImportError_(
-                        "raw ticks, options and reference tables keep full "
-                        "fidelity as Parquet")
-                # 300 MB guard keeps pandas off files that would not survive
-                # normalize on a laptop anyway.
-                if size > 300_000_000:
-                    raise userdata.ImportError_("kept as a file (too large for the library store)")
-                raw = pd.read_parquet(path)
-                sym = body.symbol or dataset
-                if body.timeframe and body.timeframe != "tick" and body.symbol:
-                    sym = f"{sym}_{body.timeframe}"
-                entry = userdata.import_table(
-                    userdata._slug(sym).upper(), raw,
-                    name=disp or (body.symbol or dataset),
-                    folder=body.folder, source_ext=".parquet")
-                job.update(status="done", entry=entry,
-                           detail=f"imported {entry['rows']} rows")
-                os.remove(path)  # library keeps its own copy
-            except userdata.ImportError_ as e:
-                # Not chartable as candles/series: the Parquet itself is the
-                # deliverable. Point the user at the file we kept.
-                if path and os.path.exists(path):
-                    job.update(status="saved", path=str(path),
-                               detail=f"saved as a Parquet file ({e})")
-                else:
-                    job.update(status="failed", error=(getattr(e, "message", None) or str(e))[:300])
-            except Exception as e:
-                if path and os.path.exists(path):
-                    try:
-                        os.remove(path)
-                    except OSError:
-                        pass
-                job.update(status="failed", error=(getattr(e, "message", None) or str(e))[:300])
-
-        threading.Thread(target=run, daemon=True,
-                         name=f"lse-databank-{job_id}").start()
-        return {"job_id": job_id}
+            return lse_import.submit(_lse_bank(), body, userdata, lsebank_jobs)
+        except lse_import.ImportProblem as e:
+            raise HTTPException(e.status, e.message)
+        except Exception as e:
+            raise _databank_http_error(e)
 
     @app.get("/api/lse/databank/import/{job_id}")
     def lsebank_job(job_id: str):
@@ -5456,11 +6186,24 @@ def create_app() -> FastAPI:
     def workspace_all():
         return workspace.load()
 
+    # A page names its window in X-LSE-Window (one name per page load, set
+    # by index.html for every request the page makes, the chart bundle's
+    # included). The store uses it to merge a window's save with what the
+    # other windows saved since that window last read (workspace.py).
+    _WINDOW_CHARS = frozenset(
+        "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-")
+
+    def _window_of(request: Request) -> str | None:
+        name = (request.headers.get("x-lse-window") or "").strip()
+        ok = 0 < len(name) <= 64 and all(ch in _WINDOW_CHARS for ch in name)
+        return name if ok else None
+
     @app.get("/api/workspace/{section}")
-    def workspace_get(section: str):
+    def workspace_get(section: str, request: Request):
         if section not in workspace.SECTIONS:
             raise HTTPException(404, f"unknown workspace section: {section}")
-        return {"section": section, "value": workspace.get(section)}
+        return {"section": section,
+                "value": workspace.get(section, window=_window_of(request))}
 
     @app.put("/api/workspace/{section}")
     async def workspace_put(section: str, request: Request):
@@ -5473,11 +6216,17 @@ def create_app() -> FastAPI:
             value = await request.json()
         except Exception:
             raise HTTPException(400, "body must be JSON")
+        window = _window_of(request)
         try:
-            workspace.put(section, value)
+            stored = workspace.put(section, value, window=window)
         except OSError as e:
             raise HTTPException(507, f"could not write workspace: {e}")
-        return {"ok": True, "section": section}
+        # Tell the other windows the section moved, so one that shows it can
+        # read it again (the stars in the sidebar, a dashboard). The sender
+        # is named so it does not answer its own save.
+        ui_event_push({"type": "workspace_section", "section": section,
+                       "by": window or ""})
+        return {"ok": True, "section": section, "merged": stored != value}
 
     @app.get("/api/config")
     def get_config():
@@ -6985,6 +7734,9 @@ def create_app() -> FastAPI:
         ok, why = verify_key(key)
         if not ok:
             raise HTTPException(400, why)
+        close_old = getattr(reg.get("lse"), "close_sync", None)
+        if close_old is not None:
+            close_old()
         old_key = cfg.get_lse_api_key()
         cfg.set_lse_api_key(key)
         # Replace the provider so the new key takes effect without a restart.
@@ -7016,6 +7768,9 @@ def create_app() -> FastAPI:
         """Sign out of LSE: the key, the live data it unlocks and the demo
         account it carries all go at once, so nothing LSE keeps answering
         after the user has signed out."""
+        close_old = getattr(reg.get("lse"), "close_sync", None)
+        if close_old is not None:
+            close_old()
         try:
             hub.disconnect("lse-sim")
         except Exception:
@@ -7094,6 +7849,14 @@ def create_app() -> FastAPI:
     async def ws(websocket: WebSocket, provider: str, symbols: str):
         await websocket.accept()
         wanted = [s for s in symbols.split(",") if s.strip()]
+        # A data_local_only broker's live prices stream to the terminal's
+        # own window only: a browser sends Origin on every websocket
+        # handshake, a program sends none (SPEC 3.3).
+        why = _local_refusal(_source_broker(provider), "Live prices")
+        if why and not _terminal_window(websocket.headers):
+            await websocket.send_json({"type": "error", "message": why})
+            await websocket.close()
+            return
         try:
             p = reg.get(provider)
             agen = p.stream(wanted)
@@ -7102,22 +7865,21 @@ def create_app() -> FastAPI:
             await websocket.close()
             return
         try:
-            async for item in agen:
-                if "error" in item:
-                    await websocket.send_json({"type": "error",
-                                               "message": item["error"]})
-                    break
-                item["type"] = "tick"
-                await websocket.send_json(item)
+            await bridge(websocket, agen)
         except WebSocketDisconnect:
             pass
         except Exception as e:
             try:
-                await websocket.send_json({"type": "error", "message": str(e)[:200]})
+                await websocket.send_json({"type": "error", "message": _said(
+                    _source_broker(provider), e)[:200]})
             except Exception:
                 pass
         finally:
             await agen.aclose()
+            try:
+                await websocket.close()
+            except (WebSocketDisconnect, RuntimeError):
+                pass
 
     # ── Algo trading: run a strategy LIVE against a brue-connect adapter ──
     #
@@ -7149,8 +7911,9 @@ def create_app() -> FastAPI:
             return connect_base(connect_dir)
         except ImportError:
             raise HTTPException(
-                503, "brue-connect not installed; pip install brue-connect "
-                     "or set LSE_BRUE_CONNECT_DIR to a checkout")
+                503, "brueconnect, the broker kit, is not installed. Update "
+                     "or reinstall the terminal, or set LSE_BRUE_CONNECT_DIR "
+                     "to a checkout")
 
     def _algo_row(rid: str, r: dict) -> dict:
         proc = r["proc"]
@@ -7174,15 +7937,17 @@ def create_app() -> FastAPI:
         return [_algo_row(rid, r) for rid, r in sorted(algo_runs.items())]
 
     @app.post("/api/algo/start")
-    def algo_start(body: AlgoStartIn):
+    def algo_start(body: AlgoStartIn, request: Request):
         deny_hosted()
+        own_origin_only(request)
         base = _connect_base_or_503()
         driver = base / "runner" / "live_driver.py"
         adapter = base / "adapters" / "paper" / "paper_adapter.py"
         if not driver.exists() or not adapter.exists():
             raise HTTPException(
-                503, f"brue-connect install at {base} is missing its "
-                     "runner/adapters; reinstall brue-connect")
+                503, f"The broker kit (brueconnect) at {base} is missing "
+                     "its runner or its paper adapter. Update or reinstall "
+                     "the terminal.")
         if not (body.script or "").strip():
             raise HTTPException(400, "empty strategy script")
         rid = _uuid.uuid4().hex[:8]
@@ -7266,12 +8031,25 @@ def create_app() -> FastAPI:
     # here knows a broker by name. Local-only like the algo runner: a
     # connection is a subprocess on the user's machine and their broker
     # credentials never touch our servers.
-    from .broker_hub import (BrokerHub, DIRECTORY_REFRESH_S, fetch_directory)
+    from .broker_hub import (BrokerHub, DIRECTORY_REFRESH_S, WORDS_CHARS,
+                             fetch_directory)
 
     # The identity cache remembers what each broker calls itself, so the
     # connection picker can name them before anything is spawned.
     hub = BrokerHub(connect_dir,
                     identity_cache=cfg.config_dir() / "broker_identity.json")
+    # Reachable beside app.state.registry, for the same readers: tests and
+    # anything in-process that needs the hub the routes below are using.
+    app.state.broker_hub = hub
+    # The window's requests from the moment they are handed on
+    # (held_requests.py): written out by _mutating before the hub has them,
+    # changed by their answers, read by GET /api/broker/held, let go by
+    # unlinking the broker. Read now, as the engine starts (what a run that
+    # stopped left out is unknown from now on); the hosted terminal, which
+    # has no broker routes, keeps none.
+    from .held_requests import FILE_NAME as _HELD_FILE, HeldRequests
+    held = None if hosted else HeldRequests(cfg.config_dir() / _HELD_FILE)
+    app.state.held_requests = held
     # Directory refresh off the startup path: the terminal must come up
     # instantly offline; the remote listing lands on the hub (and the
     # provider gate below) as soon as the first fetch returns.
@@ -7297,6 +8075,19 @@ def create_app() -> FastAPI:
     import threading as _threading
     _threading.Thread(target=_directory_loop, daemon=True).start()
 
+    def _said(broker, text) -> str:
+        """An adapter's words as a route answers them: the values its
+        profile keeps (stored keys, its own env's values) taken out
+        (BrokerHub.redact), before anything is cut, so a value is never
+        left half shown."""
+        text = text if isinstance(text, str) else str(text or "")
+        if not broker or not text:
+            return text
+        try:
+            return hub.redact(broker, text)
+        except Exception:  # noqa: BLE001 - words that cannot be checked are not said
+            return "The adapter's words could not be checked for its keys."
+
     def _hub_call(fn, *a, **kw):
         try:
             return fn(*a, **kw)
@@ -7321,19 +8112,156 @@ def create_app() -> FastAPI:
                 raise HTTPException(403, str(e))
             # adapter-typed errors (insufficient_margin, invalid_stops,
             # market_closed...) pass through so the ticket can show them;
-            # ConnectorError's str already leads with its code
-            raise HTTPException(502 if code is None else 400, str(e)[:300])
+            # ConnectorError's str already leads with its code. They are said
+            # whole (WORDS_CHARS bounds only a dump): a connect's refusal can
+            # put who may not use the broker's API last. A mutating call that
+            # an identical retry can mend, or whose outcome is not known (its
+            # answer was lost), carries what asking again needs too
+            # (`lse_again`, rendered by _mutating).
+            again = bool(getattr(e, "client_id", None)
+                         and getattr(e, "retryable", False))
+            # Every hub call names the broker first; what the profile keeps
+            # is taken out of the adapter's words before they are cut.
+            broker = a[0] if a and isinstance(a[0], str) else ""
+            out = HTTPException(502 if code is None else 400,
+                                _said(broker, str(e))[:WORDS_CHARS])
+            if again:
+                out.lse_again = {"retryable": True,
+                                 "unknown": bool(getattr(e, "fate_unknown", False)),
+                                 "client_id": e.client_id}
+                if code is not None:
+                    out.lse_again = {"code": code, **out.lse_again}
+            raise out
+
+    # ── A broker's own words, and a program (SPEC 3.3) ──────────────────────
+    # An adapter's error text, its session's detail and the lines it prints
+    # are its own words, and they can carry its prices: a margin "need", "AAPL
+    # is at ...", "the positions are worth ...", "last bid ...". On a
+    # data_local_only connection a program is given the error code and the
+    # sentence saying why in their place. The terminal's own window keeps
+    # them: its ticket and its Connections card show the broker's reason.
+    # An error code as SPEC 6 spells one (insufficient_margin, or an adapter's
+    # own x_<name>): what is kept of a broker's words when they are withheld.
+    import re as _re_mod  # noqa: PLC0415
+    _ERROR_CODE = _re_mod.compile(r"[a-z][a-z0-9_]{0,39}")
+    _SESSION_STATES = ("connected", "degraded", "disconnected")
+    # An Account as SPEC 4 names its fields (accounts.list): the account's own
+    # record. What else an adapter adds to one may be marked to the prices.
+    _ACCOUNT_ROW_KEEP = frozenset({"id", "label", "currency", "mode", "type",
+                                   "balance", "selected"})
+
+    def _code_of(text) -> str:
+        head = str(text or "").split(":", 1)[0].strip()
+        return head if _ERROR_CODE.fullmatch(head) else ""
+
+    def _program_on_local(request: Request, broker: str) -> bool:
+        """A caller that is not the terminal's own window, about a connection
+        whose broker's terms keep its prices on this computer."""
+        return bool(_local_refusal(broker)) and not _terminal_window(
+            request.headers)
+
+    def _withheld_words(broker: str, what: str) -> str:
+        try:
+            return hub.withheld(broker, what)
+        except Exception:  # noqa: BLE001 - a refusal must always be said
+            return (f"{what} withheld: this broker's terms could not be read, "
+                    "so its prices stay on this computer.")
+
+    def _broker_call(request: Request, broker: str, fn, *a, **kw):
+        """_hub_call for a route that relays what the broker says: an order
+        refused or rejected, a read or a connect that failed. For a program
+        on a data_local_only connection a 400 keeps its error code and
+        carries the sentence instead of the broker's words, and so does a
+        502 that is not the kit's own (the adapter gone or silent); what
+        asking again needs (the client_id, and whether the outcome is
+        known) is kept. Decided AFTER the call, on the terms known then: a
+        connect's own hello can be what says them."""
+        try:
+            out = _hub_call(fn, *a, **kw)
+        except HTTPException as e:
+            # 400 is _hub_call's adapter-typed branch, its detail led by the
+            # error code. A 502 is the kit's words when the adapter is gone or
+            # did not answer (Disconnected, a timeout) and may quote what the
+            # adapter sent otherwise. 403, 404 and 409 are the kit's or the
+            # hub's words.
+            cause = type(e.__context__).__name__ if e.__context__ else ""
+            words = e.status_code == 400 or (
+                e.status_code == 502
+                and cause not in ("Disconnected", "TimeoutError"))
+            if words and _program_on_local(request, broker):
+                code = _code_of(e.detail) if e.status_code == 400 else ""
+                why = _withheld_words(broker, "The broker's reason")
+                said = HTTPException(e.status_code,
+                                     f"{code}: {why}" if code else why)
+                if getattr(e, "lse_again", None):
+                    said.lse_again = e.lse_again
+                raise said from None
+            raise
+        if isinstance(out, dict) and isinstance(out.get("reason"), str) and out["reason"]:
+            # A rejected order's reason is the adapter's words too.
+            out = dict(out, reason=(
+                _withheld_words(broker, "The broker's reason")
+                if _program_on_local(request, broker) else _said(broker, out["reason"])))
+        return out
+
+    def _row_for(request: Request, row):
+        """A broker's status row as this caller may have it. For a program,
+        on a data_local_only connection, the adapter's own words in it (its
+        session's detail, a failed connect's message, the last lines the
+        adapter printed then and in its runs, `printed`) are the sentence
+        saying why, an error code kept, and its accounts keep the account's
+        own record. Everything else stays, and the window and every
+        connection without such terms get the row as it is."""
+        if not isinstance(row, dict) or _terminal_window(request.headers):
+            return row
+        broker = str(row.get("broker") or "")
+        if not _local_refusal(broker):
+            # Lines kept from a run that was held under the terms in force
+            # for it stay held, whatever the terms are now.
+            if row.get("printed"):
+                try:
+                    if hub.printed_held(broker):
+                        row = dict(row, printed=hub.printed_lines(broker, program=True))
+                except Exception:  # noqa: BLE001 - cannot tell which: none of them
+                    row = {k: v for k, v in row.items() if k != "printed"}
+            return row
+        why = _withheld_words(broker, "The broker's own words")
+        out = dict(row)
+        sess = out.get("session")
+        if isinstance(sess, dict):
+            state = sess.get("state")
+            kept = {"state": state if state in _SESSION_STATES else why}
+            if any(k != "state" for k in sess):
+                kept["detail"] = why
+            out["session"] = kept
+        failed = out.get("last_error")
+        if isinstance(failed, dict):
+            code = _code_of(failed.get("message"))
+            kept = {"message": f"{code}: {why}" if code else why}
+            if "at" in failed:
+                kept["at"] = failed["at"]
+            if failed.get("stderr"):
+                kept["stderr"] = why
+            out["last_error"] = kept
+        if out.get("printed"):
+            # what the adapter printed in its runs, for the window's card
+            out["printed"] = why
+        if isinstance(out.get("accounts"), list):
+            out["accounts"] = [
+                {k: v for k, v in acct.items() if k in _ACCOUNT_ROW_KEEP}
+                for acct in out["accounts"] if isinstance(acct, dict)]
+        return out
 
     @app.get("/api/broker/list")
-    def broker_list():
+    def broker_list(request: Request):
         # Also denied in the hosted terminal: listing brokers there would show
         # rows that can never be named or connected (every other endpoint here
         # is local-only), and an inert broker list reads as a broken one.
         deny_hosted()
-        return hub.list_brokers()
+        return [_row_for(request, r) for r in hub.list_brokers()]
 
     @app.post("/api/broker/arm")
-    def broker_arm(body: dict):
+    def broker_arm(body: dict, request: Request):
         """Clear a broker that is not paper to receive orders, or take it back.
 
         The rule is the SDK's (brueconnect.Connector refuses the call), so
@@ -7342,12 +8270,18 @@ def create_app() -> FastAPI:
         money.
         """
         deny_hosted()
+        own_origin_only(request)
+        # Arming lets the next order through, so on a live orders_by_hand_only
+        # connection only the user, in this window, gives that consent.
+        # Taking it back is open to anyone.
+        if bool(body.get("armed", True)):
+            by_hand_only(request, str(body.get("broker", "")))
         return _hub_call(hub.arm, str(body.get("broker", "")),
                          bool(body.get("armed", True)),
                          str(body.get("reason") or "armed from the terminal"))
 
     @app.post("/api/broker/probe")
-    def broker_probe(body: dict):
+    def broker_probe(body: dict, request: Request):
         """Handshake only: fills in a broker's own name for the picker.
 
         Deliberately separate from connect. Opening a session on a live
@@ -7355,7 +8289,9 @@ def create_app() -> FastAPI:
         not, and the picker needs the second without the first.
         """
         deny_hosted()
-        return _hub_call(hub.probe, str(body.get("broker", "")))
+        own_origin_only(request)
+        broker = str(body.get("broker", ""))
+        return _row_for(request, _broker_call(request, broker, hub.probe, broker))
 
     def _sync_broker_source(broker: str, status: dict) -> dict:
         """A connected broker becomes a selectable DATA source, and stops
@@ -7368,31 +8304,40 @@ def create_app() -> FastAPI:
         connection, because a venue's history is a shallow slice next to the
         LSE archive.
         """
-        from .broker_hub import BrokerProvider  # noqa: PLC0415
+        from .broker_hub import BrokerProvider, cap_flag  # noqa: PLC0415
         c = hub.conns.get(broker)
-        data = ((c.handshake.get("capabilities") or {}).get("data") or {}) if c else {}
-        if status.get("connected") and data.get("bars") and data.get("history"):
-            reg.register(BrokerProvider(hub, broker,
-                                        status.get("label") or broker))
+        if (status.get("connected") and cap_flag(c, "data", "bars")
+                and cap_flag(c, "data", "history")):
+            # the periods its adapter serves when our listing says (30m
+            # among them), else the provider contract's own
+            try:
+                periods = hub.timeframes_of(broker)
+            except Exception:  # noqa: BLE001 - not known: the contract's own
+                periods = None
+            reg.register(BrokerProvider(hub, broker, status.get("label") or broker,
+                                        timeframes=periods))
             status["data_source"] = f"broker:{broker}"
         else:
             reg.unregister(f"broker:{broker}")
         return status
 
     @app.post("/api/broker/connect")
-    def broker_connect(body: dict):
+    def broker_connect(body: dict, request: Request):
         deny_hosted()
+        own_origin_only(request)
         broker = str(body.get("broker", ""))
-        return _sync_broker_source(broker, _hub_call(hub.connect, broker))
+        return _row_for(request, _sync_broker_source(
+            broker, _broker_call(request, broker, hub.connect, broker)))
 
     @app.post("/api/broker/disconnect")
-    def broker_disconnect(body: dict):
+    def broker_disconnect(body: dict, request: Request):
         deny_hosted()
+        own_origin_only(request)
         broker = str(body.get("broker", ""))
         return _sync_broker_source(broker, _hub_call(hub.disconnect, broker))
 
     @app.post("/api/broker/credentials")
-    def broker_credentials(body: dict):
+    def broker_credentials(body: dict, request: Request):
         """Save the user's own key for a broker, on this machine only.
 
         The connection screen collects whatever fields the broker's profile
@@ -7402,13 +8347,157 @@ def create_app() -> FastAPI:
         stored, never their values, so no log line can leak a secret.
         """
         deny_hosted()
+        own_origin_only(request)
         values = body.get("values")
         if not isinstance(values, dict):
             raise HTTPException(400, "values must be an object of field: value")
-        return _hub_call(hub.set_credentials, str(body.get("broker", "")), values)
+        # merge: write only the fields the user actually typed and keep
+        # every other stored value. Without it the object REPLACES what was
+        # stored (and an empty one forgets it all), which is the older
+        # contract and the explicit "forget keys" action.
+        return _hub_call(hub.set_credentials, str(body.get("broker", "")),
+                         values, bool(body.get("merge")))
+
+    # ── Add your own broker ──────────────────────────────────────────────
+    # These three decide what program runs on the user's machine, so they
+    # carry own_window_only (above) rather than deny_hosted alone, and the
+    # two that change anything read their body by hand so that guard runs
+    # before a byte of it is parsed. The logic is the hub's; a route here
+    # only checks the request's shape and turns the hub's answer into HTTP.
+    from fastapi.concurrency import run_in_threadpool as _in_thread
+    from fastapi.responses import JSONResponse as _JSONResponse
+    from .broker_hub import LinkError
+
+    _LINK_FIELDS = {"name", "python_file", "args", "description", "env",
+                    "example", "test"}
+
+    def _link_refusal(e: LinkError, request: Request | None = None):
+        # A string `detail` like every other error here, plus the tail of
+        # the adapter's own stderr when it was run: a broken adapter's
+        # traceback is the one thing its author needs, and it used to exist
+        # only in the engine's log file. A program linking a row whose terms
+        # keep its prices on this computer gets the sentence in place of the
+        # adapter's words (LinkError.withheld); the window gets them whole.
+        words = getattr(e, "withheld", None)
+        if (isinstance(words, dict) and request is not None
+                and not _terminal_window(request.headers)):
+            return _JSONResponse({"detail": words.get("detail") or str(e),
+                                  "stderr": words.get("stderr") or ""},
+                                 status_code=e.status)
+        return _JSONResponse({"detail": str(e), "stderr": e.stderr or ""},
+                             status_code=e.status)
+
+    @app.get("/api/broker/examples")
+    def broker_examples(request: Request):
+        """Adapters shipped inside the kit that can be linked in one click."""
+        own_window_only(request, json_body=False)
+        return hub.examples()
+
+    # The two reads behind "+ Add your own broker"'s instructions. Read-only,
+    # and for the same window as the routes beside them: the second names
+    # folders on this machine.
+    @app.get("/api/broker/template")
+    def broker_template(request: Request):
+        """The kit's starter adapter, as a file to save
+        (my_broker_adapter.py). A link to it with `download` saves it in a
+        browser; in the desktop window it meets Electron's default for a
+        download, which asks where to save it (the shell sets no handler of
+        its own)."""
+        own_window_only(request, json_body=False)
+        path = hub.template_path()
+        if path is None:
+            raise HTTPException(404, "This terminal's kit has no starter "
+                                     "adapter. Update the terminal.")
+        from fastapi.responses import Response as _Response  # noqa: PLC0415
+        return _Response(
+            path.read_bytes(), media_type="text/x-python; charset=utf-8",
+            headers={"Content-Disposition":
+                     'attachment; filename="my_broker_adapter.py"'})
+
+    @app.post("/api/broker/template/save")
+    async def broker_template_save(request: Request):
+        """"Create my starter adapter": the kit's starter written to the
+        user's own folder (BrokerHub.save_template), its path returned for
+        the card to fill in. An existing file there is kept as it is."""
+        own_window_only(request)
+        try:
+            return hub.save_template()
+        except LookupError:
+            raise HTTPException(404, "This terminal's kit has no starter "
+                                     "adapter. Update the terminal.")
+        except OSError as e:
+            raise HTTPException(500, f"The starter adapter could not be saved: {e}")
+
+    @app.post("/api/broker/template/reveal")
+    async def broker_template_reveal(request: Request):
+        """"Open folder": the saved starter shown in the file manager. Only
+        that file or its folder; the page names no path."""
+        own_window_only(request)
+        try:
+            return hub.reveal_template()
+        except LookupError:
+            raise HTTPException(404, "Create the starter adapter first.")
+        except OSError as e:
+            raise HTTPException(500, f"The folder could not be opened: {e}")
+
+    @app.get("/api/broker/own-guide")
+    def broker_own_guide(request: Request):
+        """This machine's facts for adding a broker of your own: the Python
+        that runs an adapter, its version, the SDK folder, the platform and
+        the command that tests the starter adapter (BrokerHub.own_guide)."""
+        own_window_only(request, json_body=False)
+        return hub.own_guide()
+
+    @app.post("/api/broker/link")
+    async def broker_link(request: Request):
+        """Link an adapter of the user's own: a .py file, or a kit example.
+
+        The adapter is run and handshaken before anything is stored (always,
+        from this route: a `test` field is accepted and cannot switch it
+        off). On failure nothing is stored and the answer carries the
+        adapter's own error and its stderr tail. On success: the hub row.
+        """
+        own_window_only(request)
+        body = await json_object(request)
+        unknown = sorted(set(body) - _LINK_FIELDS)
+        if unknown:
+            # Refused, not ignored: a caller that sent `command` or `argv`
+            # believes it registered that, and it did not.
+            raise HTTPException(400, f"unknown field(s): {', '.join(unknown)}")
+        try:
+            status = await _in_thread(
+                hub.link, body.get("name"),
+                python_file=body.get("python_file"), args=body.get("args"),
+                description=body.get("description") or "",
+                env=body.get("env"), example=body.get("example"))
+        except LinkError as e:
+            return _link_refusal(e, request)
+        # The row as this caller may have it: a program on a data_local_only
+        # row gets the sentence in place of what the test spawn printed.
+        return _row_for(request, status)
+
+    @app.post("/api/broker/unlink")
+    async def broker_unlink(request: Request):
+        """Remove a broker the user linked (disconnecting it first).
+        `forget` also deletes its stored keys and account choice."""
+        own_window_only(request)
+        body = await json_object(request)
+        name = str(body.get("name") or body.get("broker") or "")
+        try:
+            out = await _in_thread(hub.unlink, name, bool(body.get("forget")))
+        except KeyError as e:
+            raise HTTPException(404, str(e.args[0]) if e.args else str(e))
+        except LinkError as e:
+            return _link_refusal(e)
+        reg.unregister(f"broker:{name}")
+        # Unlinked (and, with `forget`, forgotten): its requests are no
+        # longer held.
+        if held is not None:
+            held.forget_broker(name)
+        return out
 
     @app.post("/api/broker/account")
-    def broker_account(body: dict):
+    def broker_account(body: dict, request: Request):
         """Pick which of the login's accounts this broker deals on.
 
         Stored on this machine and applied by spawning the adapter bound to
@@ -7416,15 +8505,29 @@ def create_app() -> FastAPI:
         is always a fresh session rather than a swap under open positions.
         """
         deny_hosted()
+        own_origin_only(request)
         broker = str(body.get("broker", ""))
         # An empty account_id FORGETS the choice, which is how "switch
         # account" reopens the chooser without making the user log in again.
         account_id = str(body.get("account_id", ""))
-        return _sync_broker_source(
-            broker, _hub_call(hub.choose_account, broker, account_id))
+        # While this broker has a request still out or unknown, switching
+        # account asks first: a bare switch is refused with the oldest held
+        # request's own sentence, and switches nothing, so a held request is
+        # never left bound to an account the user has moved off. "confirm":
+        # true goes ahead; the held entries keep the account they went out
+        # on, so an Ask again on one of them is then refused until the user
+        # switches back (held_other_account, _mutating).
+        if held is not None and not body.get("confirm"):
+            oldest = held.oldest_live(broker)
+            if oldest is not None:
+                return _JSONResponse({"detail": _held_sentence(oldest),
+                                      "code": "held_requests"}, status_code=409)
+        return _row_for(request, _sync_broker_source(
+            broker, _broker_call(request, broker, hub.choose_account, broker,
+                                 account_id)))
 
     @app.post("/api/broker/auth/open")
-    def broker_auth_open(body: dict):
+    def broker_auth_open(body: dict, request: Request):
         """Open the pending broker login in the user's own browser.
 
         The engine runs on the user's machine (deny_hosted above), so
@@ -7436,6 +8539,7 @@ def create_app() -> FastAPI:
         engine, exotic desktop).
         """
         deny_hosted()
+        own_origin_only(request)
         broker = str(body.get("broker", ""))
         url = _hub_call(hub.auth_url, broker)
         if not url:
@@ -7449,44 +8553,343 @@ def create_app() -> FastAPI:
         return {"broker": broker, "url": url, "opened": bool(opened)}
 
     @app.get("/api/broker/catalog")
-    def broker_catalog(broker: str):
-        return _hub_call(hub.catalog, broker)
+    def broker_catalog(broker: str, request: Request):
+        rows = _broker_call(request, broker, hub.catalog, broker)
+        # For a data_local_only connection a program gets each instrument as
+        # the broker's contract for it, SPEC 4's record all the way down, and
+        # nothing worked out from a price: a minimum stop stated as a share of
+        # the price comes back in points of it, which with the tick size gives
+        # the price back (SPEC 3.3). Such a figure is kept where our listing
+        # says the broker's adapter sends it fixed (hub.priced_fields). Each
+        # row that lost a field says which, by its path, and why. The window,
+        # whose ticket sizes and prices orders from the whole row, gets every
+        # field.
+        if not _program_on_local(request, broker):
+            return rows
+        from .broker_hub import PRICED_FIELDS, instrument_record_only  # noqa: PLC0415
+        try:
+            priced = hub.priced_fields(broker)
+        except Exception:  # noqa: BLE001 - not known which: all of them
+            priced = PRICED_FIELDS
+        said, out = {}, []
+        for spec in rows:
+            kept, dropped = instrument_record_only(spec, priced)
+            if dropped:
+                what = ", ".join(dropped)
+                if what not in said:
+                    said[what] = _withheld_words(broker, what)
+                kept["withheld"] = said[what]
+            out.append(kept)
+        return out
 
     @app.get("/api/broker/account")
-    def broker_account(broker: str):
-        return _hub_call(hub.account, broker)
+    def broker_account(broker: str, request: Request):
+        acct = _broker_call(request, broker, hub.account, broker)
+        # For a data_local_only connection a program gets the account's own
+        # record (its balance, currency and names) and not the figures marked
+        # to its positions' current prices (equity, margin in use, free
+        # margin), which give those prices back (SPEC 3.3); the answer says
+        # which were held back, and why.
+        if _local_refusal(broker) and not _terminal_window(request.headers):
+            from .broker_hub import account_record_only, priced_names  # noqa: PLC0415
+            kept, dropped = account_record_only(acct)
+            named = priced_names(acct, dropped)
+            if named:
+                kept["withheld"] = hub.withheld(broker, ", ".join(named))
+            return kept
+        return acct
 
     @app.get("/api/broker/positions")
-    def broker_positions(broker: str):
-        return _hub_call(hub.positions, broker)
+    def broker_positions(broker: str, request: Request):
+        rows = _broker_call(request, broker, hub.positions, broker)
+        # The account's own records are not market data (SPEC 3.3), so a
+        # program still gets them; for a data_local_only connection it gets
+        # nothing else: not a current price or market value an adapter added,
+        # nor the unrealised P/L marked to it. Each position that lost a field
+        # says which, and why.
+        if _local_refusal(broker) and not _terminal_window(request.headers):
+            from .broker_hub import priced_names, record_only  # noqa: PLC0415
+            out = []
+            for p in rows:
+                kept, dropped = record_only(p)
+                named = priced_names(p, dropped)
+                if named:
+                    kept["withheld"] = hub.withheld(broker, ", ".join(named))
+                out.append(kept)
+            return out
+        return rows
 
     @app.post("/api/broker/subscribe")
-    def broker_subscribe(body: dict):
-        """Price only what is on screen. See BrokerHub.subscribe."""
+    def broker_subscribe(body: dict, request: Request):
+        """Price the ticket and held positions using the display-owned subscription set."""
         deny_hosted()
+        own_origin_only(request)
         syms = body.get("symbols") or []
         if not isinstance(syms, list):
             raise HTTPException(400, "symbols must be a list")
-        return _hub_call(hub.subscribe, str(body.get("broker", "")),
-                         [str(s) for s in syms])
+        # The window that asks, so two windows' tickets keep their own
+        # claims (BrokerHub.subscribe_display). A page that names none is
+        # the one display there always was.
+        display = _window_of(request) or ""
+        return _broker_call(request, str(body.get("broker", "")),
+                            hub.subscribe_display, str(body.get("broker", "")),
+                            [str(s) for s in syms], display)
 
     @app.get("/api/broker/quotes")
-    def broker_quotes(broker: str):
+    def broker_quotes(broker: str, request: Request):
+        local_data_only(request, broker, "Prices")
         return _hub_call(hub.latest_quotes, broker)
 
+    # ── asking again (SPEC 2) ──────────────────────────────────────────────
+    # The order, close and cancel routes take back the client_id an earlier
+    # answer gave. A request whose answer was lost may have been carried out;
+    # sent again under the same client_id it is answered from the broker's
+    # own record, never carried out a second time, where a new client_id is
+    # a new order. Without one, the hub makes a new one, as before.
+    _CLIENT_ID = _re_mod.compile(r"[A-Za-z0-9][!-~]{0,127}")
+
+    def _client_id_of(body: dict):
+        cid = body.get("client_id")
+        if cid is None or cid == "":
+            return None
+        if not isinstance(cid, str) or not _CLIENT_ID.fullmatch(cid):
+            raise HTTPException(
+                400, "client_id must be the one an earlier answer gave: up "
+                     "to 128 letters, digits and signs, with no spaces")
+        return cid
+
+    # The fields of a request body the four routes read: what asking again
+    # sends, so what the record keeps of them is what was sent.
+    _SENT_AGAIN = frozenset({"broker", "symbol", "side", "qty", "sl", "tp", "type",
+                             "price", "stop_price", "client_id", "order_id",
+                             "position_id"})
+
+    def _secrets_out(broker: str, value, top: bool = True):
+        """A request body with the values the profile keeps taken out of its
+        strings (none are there from the page; kept so none can be), but for
+        the fields the routes read (_SENT_AGAIN), which are kept as sent: a
+        short stored value can be part of a symbol or the whole of an order
+        id, and changed, asking again would ask about another one."""
+        if isinstance(value, str):
+            return _said(broker, value)
+        if isinstance(value, dict):
+            return {k: (v if top and k in _SENT_AGAIN else _secrets_out(broker, v, False))
+                    for k, v in value.items()}
+        if isinstance(value, list):
+            return [_secrets_out(broker, v, False) for v in value]
+        return value
+
+    def _new_client_id(route: str, body: dict) -> str:
+        """The client_id a window's request with none goes under, made before
+        the record is written: the one the hub would make for it."""
+        from .broker_hub import new_client_id  # noqa: PLC0415
+        if route == "/api/broker/order/cancel":
+            return new_client_id("cancel", str(body.get("order_id", "")))
+        if route == "/api/broker/close":
+            return new_client_id("close", str(body.get("position_id", "")),
+                                 body.get("qty"))
+        return new_client_id("order")
+
+    def _instrument_of(body) -> str | None:
+        """The instrument a request is about, as it names it: an order's
+        symbol, and a cancel's, which the page sends beside the order id (the
+        adapter is sent the order id alone)."""
+        sym = body.get("symbol") if isinstance(body, dict) else None
+        return sym if isinstance(sym, str) and sym else None
+
+    # How each kind of request reads in a held sentence of a lost answer, as
+    # the ticket's own line says it (app.js tpxHeldText): what may have
+    # happened, where to check, and the undo it names.
+    _HELD_SAY = {
+        "order": ("The order may have been placed", "Positions", "placing it again"),
+        "resting": ("The order may have been placed", "Orders", "placing it again"),
+        "close": ("The close may have been carried out", "Positions", "closing it again"),
+        "cancel": ("The cancel may have been carried out", "Orders", "cancelling it again")}
+
+    def _held_name(entry: dict) -> str:
+        """A held request named as the ticket names it (app.js tpxHeldName)."""
+        b = entry.get("request") or {}
+        what = entry.get("what")
+        if what == "order":
+            return f"The order to {b.get('side')} {b.get('qty')} {b.get('symbol')}"
+        if what == "resting":
+            return (f"The {b.get('side')} {b.get('type')} order for "
+                    f"{b.get('qty')} {b.get('symbol')}")
+        if what == "close":
+            sym = entry.get("instrument") or b.get("position_id")
+            return (f"The close of {b.get('qty')} {sym}" if b.get("qty") is not None
+                    else f"The close of {sym}")
+        return f"The cancel of order {b.get('order_id')}"
+
+    def _held_sentence(entry: dict) -> str:
+        """One held request in a sentence, as its ticket line reads it: an
+        entry still out is waiting for the broker's answer; one whose answer
+        was lost may have been carried out; one left by a stopped engine says
+        the engine's own words (engine_stopped). The oldest such sentence is
+        what an account switch of a broker with anything held is refused
+        with."""
+        name = hub.terms_name(entry.get("broker", ""))
+        if entry.get("state") == "out":
+            return f"{_held_name(entry)} is waiting for {name}'s answer."
+        if entry.get("code") == "engine_stopped" and isinstance(entry.get("detail"), str):
+            return entry["detail"]
+        say = _HELD_SAY.get(entry.get("what"), _HELD_SAY["order"])
+        return f"{say[0]}: the answer from {name} was lost. Check {say[1]} before {say[2]}."
+
+    def _other_account_words(broker: str, entry_account, now_account) -> str:
+        """Why an Ask again is refused: the request went out on one account
+        and the broker is now on another, named as the card masks them."""
+        name = hub.terms_name(broker)
+        return (f"This request went out on {name} account {_mask_account(entry_account)}, "
+                f"and {name} is now on account {_mask_account(now_account)}. Switch back "
+                f"to {_mask_account(entry_account)} to ask again.")
+
+    def _an_answer(e) -> bool:
+        """Whether an exception out of a hub call is an answer the route
+        relays, the broker's, the kit's or the hub's (the broker not linked
+        or not connected, not armed, refused, not answered in time, the
+        adapter not running), rather than the engine's own failure after the
+        request was handed on, whose outcome is then not known."""
+        if isinstance(e, (KeyError, LookupError, TimeoutError, HTTPException)):
+            return True
+        if getattr(e, "code", None) is not None:
+            return True
+        return type(e).__name__ == "Disconnected"
+
+    def _answer_words(out):
+        """(ok, words, code) of a 2xx answer: an order the broker rejected is
+        not ok, and its reason is its words."""
+        if not isinstance(out, dict):
+            return True, None, None
+        reason = out.get("reason")
+        words = reason if isinstance(reason, str) and reason else None
+        return (out.get("status") != "rejected", words,
+                (_code_of(words) or None) if words else None)
+
+    def _record_answer(ticket, status: int, said, again) -> None:
+        """The answer to the window's request `ticket` names, kept by the
+        record (held_requests.py): not known holds it unknown; one that
+        settles it (a 2xx, or a 400 with nothing to ask again: the page's own
+        reading) is listed answered; any other puts back what was held before
+        it, or is listed answered when nothing was."""
+        try:
+            if status < 300:
+                ok, words, code = _answer_words(said)
+                held.settled(ticket, ok=ok, status=status, detail=words, code=code)
+            elif again and again.get("unknown"):
+                held.unknown(ticket, said, again.get("code"))
+            elif status == 400 and not again:
+                held.settled(ticket, ok=False, status=status, detail=said,
+                             code=_code_of(said) or None)
+            else:
+                held.other(ticket, ok=False, status=status, detail=said,
+                           code=(again or {}).get("code") or _code_of(said) or None)
+        except Exception:  # noqa: BLE001 - the answer is said regardless
+            pass
+
+    def _mutating(request: Request, broker: str, fn, *a, held_as=None, **kw):
+        """_broker_call for a route that sends the broker an order, a close
+        or a cancel. A failure that an identical retry can mend, or whose
+        outcome is not known because its answer was lost
+        (broker_hub.fate_unknown), answers with what asking again needs
+        beside the words: `retryable`, `unknown` and the `client_id` it went
+        under, to send back with the same request. So does a failure of the
+        engine's own after the request was handed to the hub: it may have
+        been carried out.
+
+        From the terminal's own window (`held_as`: the route and the body it
+        sent), the request is kept in the record GET /api/broker/held reads,
+        keyed by (broker, client_id), from before it is handed on: written
+        "out" (a body with no client_id is given one first, and sent under
+        it), then changed by its answer (_record_answer). A program's
+        requests are never recorded."""
+        ticket = None
+        if (held is not None and held_as is not None
+                and _terminal_window(request.headers)):
+            route, body = held_as
+            cid = kw.get("client_id")
+            # An Ask again (a window request under a held entry's client_id)
+            # on another account than the one the entry went out on is
+            # refused here, before anything reaches the hub: asking again on
+            # the wrong account would close or place on an account the user
+            # never chose for it (SPEC 1.7). The entry stays as it was.
+            if cid:
+                prior = held.entry(broker, cid)
+                now_acct = hub.bound_account(broker)
+                if (prior is not None and prior.get("state") == "unknown"
+                        and prior.get("account") and prior.get("account") != now_acct):
+                    return _JSONResponse(
+                        {"detail": _other_account_words(broker, prior["account"], now_acct),
+                         "code": "held_other_account"}, status_code=409)
+            if not cid:
+                kw["client_id"] = _new_client_id(route, body)
+            try:
+                ticket = held.send(
+                    broker, kw["client_id"], route,
+                    _secrets_out(broker, {**body, "client_id": kw["client_id"]}),
+                    _instrument_of(body), account=hub.bound_account(broker))
+            except Exception:  # noqa: BLE001 - never a reason to refuse the order
+                ticket = None
+        asked = kw.get("client_id")
+        slipped = []
+
+        def handed(*fa, **fkw):
+            try:
+                return fn(*fa, **fkw)
+            except Exception as e:
+                if not _an_answer(e):
+                    slipped.append(e)
+                raise
+
+        try:
+            out = _broker_call(request, broker, handed, *a, **kw)
+        except HTTPException as e:
+            again = getattr(e, "lse_again", None)
+            cid = asked or (getattr(slipped[0], "client_id", None) if slipped else None)
+            if slipped and not again and cid:
+                again = {"retryable": True, "unknown": True, "client_id": cid}
+            if ticket is not None:
+                _record_answer(ticket, e.status_code, e.detail, again)
+            if not again:
+                raise
+            return _JSONResponse({"detail": e.detail, **again},
+                                 status_code=e.status_code)
+        except BaseException as e:
+            # (not an answer the hub gave: the engine itself failed after
+            # handing the request on)
+            if ticket is not None:
+                try:
+                    held.unknown(ticket, "The Terminal's engine failed before the "
+                                 f"broker's answer was read ({type(e).__name__}), so "
+                                 "it may have been carried out.", None)
+                except Exception:  # noqa: BLE001
+                    pass
+            raise
+        if ticket is not None:
+            _record_answer(ticket, 200, out, None)
+        return out
+
     @app.post("/api/broker/order")
-    def broker_order(body: dict):
+    def broker_order(body: dict, request: Request):
         deny_hosted()
+        own_origin_only(request)
+        # Orders on a live orders_by_hand_only connection come from the
+        # user's own click in the terminal's window, and from nothing else.
+        by_hand_only(request, str(body.get("broker", "")))
         qty = float(body.get("qty", 0))
         if not qty > 0:
             raise HTTPException(400, "qty must be > 0")
-        return _hub_call(
-            hub.order, str(body.get("broker", "")), str(body.get("symbol", "")),
+        cid = _client_id_of(body)
+        broker = str(body.get("broker", ""))
+        return _program_answer(request, broker, _mutating(
+            request, broker,
+            hub.order, broker, str(body.get("symbol", "")),
             str(body.get("side", "")), qty,
-            body.get("sl"), body.get("tp"))
+            body.get("sl"), body.get("tp"), client_id=cid,
+            held_as=("/api/broker/order", body)), "order")
 
     @app.post("/api/broker/order/pending")
-    def broker_order_pending(body: dict):
+    def broker_order_pending(body: dict, request: Request):
         """Resting order (limit/stop) from the chart's right-click menu.
 
         Deliberately NOT a `type` field on /api/broker/order: the desktop app
@@ -7496,6 +8899,8 @@ def create_app() -> FastAPI:
         404s and the ticket reports it, which is the safe failure.
         """
         deny_hosted()
+        own_origin_only(request)
+        by_hand_only(request, str(body.get("broker", "")))
         qty = float(body.get("qty", 0))
         if not qty > 0:
             raise HTTPException(400, "qty must be > 0")
@@ -7505,47 +8910,149 @@ def create_app() -> FastAPI:
         price = body.get("price")
         if price is None:
             raise HTTPException(400, f"{otype} order needs a price")
-        return _hub_call(
-            hub.order, str(body.get("broker", "")), str(body.get("symbol", "")),
+        cid = _client_id_of(body)
+        broker = str(body.get("broker", ""))
+        return _program_answer(request, broker, _mutating(
+            request, broker,
+            hub.order, broker, str(body.get("symbol", "")),
             str(body.get("side", "")), qty,
             body.get("sl"), body.get("tp"),
-            otype, price, body.get("stop_price"))
+            otype, price, body.get("stop_price"), client_id=cid,
+            held_as=("/api/broker/order/pending", body)), "order")
+
+    def _record_rows(request: Request, broker: str, rows, fields):
+        """A program's orders or fills rows on a data_local_only connection:
+        each the account's own record (SPEC 4's fields, `fields`), saying
+        which of its fields were left out and why, and an order's reason
+        (the broker's own words) the sentence instead, its error code kept,
+        as on the status rows. The window, and every connection without such
+        terms, get the rows as the adapter sent them."""
+        if not isinstance(rows, list) or not _program_on_local(request, broker):
+            return rows
+        from .broker_hub import priced_names, row_record_only  # noqa: PLC0415
+        said, out = {}, []
+        for row in rows:
+            kept, dropped = row_record_only(row, fields)
+            reason = kept.get("reason")
+            if reason is not None:
+                code = _code_of(reason) if isinstance(reason, str) else ""
+                why = _withheld_words(broker, "The broker's reason")
+                kept["reason"] = f"{code}: {why}" if code else why
+            named = priced_names(row, dropped)
+            if named:
+                what = ", ".join(named)
+                if what not in said:
+                    said[what] = _withheld_words(broker, what)
+                kept["withheld"] = said[what]
+            out.append(kept)
+        return out
+
+    def _program_answer(request: Request, broker: str, out, kind: str):
+        """A mutating route's answer as a program may have it. On a
+        data_local_only connection: an order's `fill` is the account's own
+        record of it (FILL_RECORD_FIELDS), and a cancel's, a close's or a
+        modify's answer is SPEC's {}; what was left out that can carry a
+        price is named in `withheld`, with why. The engine's own fields of an
+        order's answer (its order_id, client_id, status and reason, which
+        _broker_call already says for a program) stay. The window, and every
+        connection without such terms, get the answer as it came."""
+        if not isinstance(out, dict) or not _program_on_local(request, broker):
+            return out
+        from .broker_hub import FILL_RECORD_FIELDS, priced_names, row_record_only  # noqa: PLC0415
+        if kind == "order":
+            fill = out.get("fill")
+            if fill is None or "fill" not in out:
+                return out
+            kept, dropped = row_record_only(fill, FILL_RECORD_FIELDS)
+            named = priced_names(fill, dropped)
+            if named:
+                kept["withheld"] = _withheld_words(broker, ", ".join(named))
+            return dict(out, fill=kept)
+        named = priced_names(out, list(out))
+        return {"withheld": _withheld_words(broker, ", ".join(named))} if named else {}
 
     @app.get("/api/broker/orders")
-    def broker_orders(broker: str):
+    def broker_orders(broker: str, request: Request):
         """Resting orders for the dock's Orders tab. Read-only, so no
-        deny_hosted, same as account and positions."""
-        return _hub_call(hub.orders_list, broker)
+        deny_hosted, same as account and positions. A program on a
+        data_local_only connection gets each as the account's own record
+        (_record_rows)."""
+        from .broker_hub import ORDER_RECORD_FIELDS  # noqa: PLC0415
+        return _record_rows(request, broker,
+                            _broker_call(request, broker, hub.orders_list, broker),
+                            ORDER_RECORD_FIELDS)
 
     @app.post("/api/broker/order/cancel")
-    def broker_order_cancel(body: dict):
+    def broker_order_cancel(body: dict, request: Request):
         deny_hosted()
-        return _hub_call(hub.cancel_order, str(body.get("broker", "")),
-                         str(body.get("order_id", "")))
+        own_origin_only(request)
+        by_hand_only(request, str(body.get("broker", "")))
+        cid = _client_id_of(body)
+        broker = str(body.get("broker", ""))
+        return _program_answer(request, broker, _mutating(
+            request, broker, hub.cancel_order, broker,
+            str(body.get("order_id", "")), client_id=cid,
+            held_as=("/api/broker/order/cancel", body)), "cancel")
 
     @app.post("/api/broker/close")
-    def broker_close(body: dict):
+    def broker_close(body: dict, request: Request):
         deny_hosted()
-        return _hub_call(hub.close_position, str(body.get("broker", "")),
-                         str(body.get("position_id", "")), body.get("qty"))
+        own_origin_only(request)
+        by_hand_only(request, str(body.get("broker", "")))
+        cid = _client_id_of(body)
+        broker = str(body.get("broker", ""))
+        return _program_answer(request, broker, _mutating(
+            request, broker, hub.close_position, broker,
+            str(body.get("position_id", "")), body.get("qty"),
+            client_id=cid, held_as=("/api/broker/close", body)), "close")
+
+    @app.get("/api/broker/held")
+    def broker_held(request: Request):
+        """The requests this window sent, oldest first, for a page loaded
+        after they were sent to hold them again (held_requests.py): each in
+        its state, "out" (handed on, no answer yet), "unknown" (its fate not
+        known: its answer was lost, or the engine stopped before it came) or
+        "answered" (settled in the last 120 s, with `ok` and the HTTP
+        `status`); with the broker profile, the route it went to, the body it
+        sent (its client_id in it), the instrument it is about, when it first
+        went out, and the answer's words and code. The window's alone: a
+        program gets the refusal the window-only routes give."""
+        own_window_only(request, json_body=False)
+        if not _terminal_window(request.headers):
+            raise HTTPException(403, _OWN_WINDOW)
+        return {"held": held.held() if held is not None else []}
 
     @app.post("/api/broker/modify")
-    def broker_modify(body: dict):
+    def broker_modify(body: dict, request: Request):
         """SL/TP on an open position. The body carries the FULL desired
         bracket (null clears a side), mirroring /api/sim/modify so the chart
         drag handles have one contract on both trading paths."""
         deny_hosted()
-        return _hub_call(hub.modify_position, str(body.get("broker", "")),
-                         str(body.get("position_id", "")),
-                         body.get("sl"), body.get("tp"))
+        own_origin_only(request)
+        broker = str(body.get("broker", ""))
+        by_hand_only(request, broker)
+        return _program_answer(request, broker, _broker_call(
+            request, broker, hub.modify_position, broker,
+            str(body.get("position_id", "")), body.get("sl"), body.get("tp")), "modify")
 
     @app.get("/api/broker/fills")
-    def broker_fills(broker: str, frm: int | None = None,
+    def broker_fills(broker: str, request: Request, frm: int | None = None,
                      to: int | None = None):
         """The connected broker's fill ledger, for the dock's History tab.
         `frm`/`to` are UTC epoch ms (frm, not from: python keyword). Read
-        only, so no deny_hosted, same as account and positions."""
-        return _hub_call(hub.fills, broker, frm, to)
+        only, so no deny_hosted, same as account and positions. A program on
+        a data_local_only connection gets each fill as the account's own
+        record (_record_rows)."""
+        from .broker_hub import FILL_RECORD_FIELDS  # noqa: PLC0415
+        return _record_rows(request, broker,
+                            _broker_call(request, broker, hub.fills, broker, frm, to),
+                            FILL_RECORD_FIELDS)
+
+    @app.on_event("shutdown")
+    async def _provider_shutdown():
+        close = getattr(reg.get("lse"), "close", None)
+        if close is not None:
+            await close()
 
     @app.on_event("shutdown")
     def _broker_shutdown():

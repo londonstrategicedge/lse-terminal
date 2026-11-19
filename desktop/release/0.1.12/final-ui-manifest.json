@@ -1,0 +1,17 @@
+[
+  {
+    "file": "app.js",
+    "sha256": "8506f7893c8b8169cc018838f6147853bb4d786eb14d96e1d80eb1d346b41edc",
+    "bytes": 777455
+  },
+  {
+    "file": "index.html",
+    "sha256": "24245601a77f6b1442cff3cfbeeeeb7feb71ee6036c2b965d3ec4000caf82183",
+    "bytes": 67212
+  },
+  {
+    "file": "guide.md",
+    "sha256": "d7898949b5a4bdaf2194a741d87bfb4412ff1e5e95c5b4214bf12bbbfe255db8",
+    "bytes": 57647
+  }
+]

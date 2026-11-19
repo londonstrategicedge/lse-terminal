@@ -1,0 +1,24 @@
+{
+  "before": 2949,
+  "after": 2966,
+  "missing": [],
+  "added": [
+    "brueconnect.__main__",
+    "brueconnect.adapters",
+    "brueconnect.adapters.lse_sim",
+    "brueconnect.adapters.lse_sim.lse_sim_adapter",
+    "brueconnect.adapters.novafx",
+    "brueconnect.adapters.novafx.novafx_adapter",
+    "brueconnect.adapters.paper",
+    "brueconnect.adapters.paper.paper_adapter",
+    "brueconnect.conformance",
+    "brueconnect.conformance.auth_drivers",
+    "brueconnect.conformance.auth_drivers.meridian_login",
+    "brueconnect.conformance.run",
+    "brueconnect.runner",
+    "brueconnect.runner.live_driver",
+    "lse_terminal.engine.lse_import",
+    "lse_terminal.engine.streaming",
+    "lse_terminal.providers.site_stream"
+  ]
+}

@@ -6,13 +6,36 @@ from fastapi.testclient import TestClient
 from lse_terminal.engine.server import create_app
 
 
+@pytest.fixture(autouse=True)
+def _own_brue_connect_home(tmp_path, monkeypatch):
+    # Brue Connect keeps the brokers a user linked, and each broker's own
+    # state, under BRUE_CONNECT_HOME (else ~/.brue-connect). Every test here
+    # gets its own, so none reads or writes the developer's.
+    monkeypatch.setenv("BRUE_CONNECT_HOME", str(tmp_path / "brue-connect"))
+
+
 @pytest.fixture()
 def client(tmp_path, monkeypatch):
     # Point config at a sandbox and hide any real key so `lse` shows
     # unconfigured; tests must never touch the developer's real config.
     monkeypatch.setenv("LSE_TERMINAL_CONFIG_DIR", str(tmp_path))
     monkeypatch.delenv("LSE_API_KEY", raising=False)
+    # The broker tests below use "paper-fast": the bundled paper adapter on a
+    # fast clock, a name the Connections screen hides.
+    _add_paper_fast()
     return TestClient(create_app(), base_url="http://127.0.0.1")
+
+
+def _add_paper_fast():
+    import sys
+    from pathlib import Path
+
+    import brueconnect
+    from brueconnect import registry
+
+    paper = Path(brueconnect.__file__).resolve().parent / "adapters" / "paper" / "paper_adapter.py"
+    registry.add("paper-fast", argv=[sys.executable, str(paper), "--tick-ms", "20"],
+                 description="fast paper (tests)")
 
 
 def test_health(client):

@@ -5,6 +5,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("lseShell", {
   capture: () => ipcRenderer.invoke("lse-capture"),
+  // Another window of the terminal on `view` ("workspace", "markets/sub-mk-
+  // options", ...), for a second monitor. The shell places and remembers it.
+  openWindow: (view) => ipcRenderer.invoke("lse-window-open", String(view || "")),
   update: {
     // Returns {supported, current, latest, available, phase, pct}. supported
     // is false on builds with no updater (mac, dev, no dep), where the page

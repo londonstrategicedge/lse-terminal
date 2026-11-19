@@ -13,8 +13,9 @@
 // MIC-TO-MARKET-HOURS MAPPING:
 //   XCRYPTO           -> always open (24/7)
 //   XFOREX            -> forex hours (Sun 5pm ET to Fri 5pm ET)
-//   XOANDA commodity  -> CME Globex (Sun 6pm ET to Fri 5pm ET, daily 5-6pm break)
-//   XOANDA index      -> CME Globex (same as commodity)
+//   the CFD feed's code, commodity -> CME Globex (Sun 6pm ET to Fri 5pm ET, daily 5-6pm break)
+//   the CFD feed's code, index     -> CME Globex (same as commodity)
+//                       (the code is the one isMarketOpenByMic's switch names for CFDs)
 //   XNYS              -> US stock hours (9:30am to 4pm ET, holidays, early closes)
 //   XLON              -> London (8am to 4:30pm London time)
 //   XASX              -> Sydney (10am to 4pm AEST/AEDT)
@@ -413,7 +414,7 @@ export const isUKMarketOpen = (timestamp?: string | number | Date): boolean => {
 };
 
 /**
- * CME Globex commodities and indices (XOANDA): Sun 6pm ET - Fri 5pm ET.
+ * CME Globex commodities and indices (the CFD feed's code): Sun 6pm ET - Fri 5pm ET.
  * Daily maintenance break 5:00 PM - 6:00 PM ET (Mon-Thu).
  *
  * Used for gold, silver, oil, natural gas, and all index CFDs.
@@ -477,7 +478,7 @@ export interface ExchangeInfo {
  * MIC-to-exchange-ID mapping. Maps catalog MIC codes to the internal exchange IDs
  * used by getExchangeInfo(). This is how MIC drives exchange-specific hours.
  *
- * XNYS and XFOREX/XCRYPTO/XOANDA are handled separately (they have dedicated
+ * XNYS, XFOREX, XCRYPTO and the CFD feed's code are handled separately (they have dedicated
  * market open functions), so they're not in this map.
  */
 const MIC_TO_EXCHANGE_ID: Record<string, string> = {
@@ -703,7 +704,7 @@ export const isMarketOpenForPair = (pair: string, timestamp?: string | number | 
  * The mapping is:
  *   XCRYPTO -> always open
  *   XFOREX  -> isForexMarketOpen (Sun 5pm ET - Fri 5pm ET)
- *   XOANDA  -> isCommodityMarketOpen (CME Globex hours, for both commodities and indices)
+ *   the CFD feed's code -> isCommodityMarketOpen (CME Globex hours, for both commodities and indices)
  *   XNYS    -> isUSMarketOpen (9:30am-4pm ET, for both stocks and ETFs)
  *   XLON, XASX, XBOM, XHKG, XKRX, XTAI, XTKS -> isIntlExchangeOpen with mapped exchange ID
  */

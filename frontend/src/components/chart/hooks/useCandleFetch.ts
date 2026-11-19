@@ -145,13 +145,13 @@ export function isForex(pairStr: string): boolean {
 // Convert a pair string to its PostgREST table name.
 // Uses the symbol table map (from x_pricecache) for database-driven
 // resolution, with fallback to computed names for unknown symbols.
-// dataSource switches between 'candles_*' (default), 'oanda_*', and prop firm tables.
+// dataSource switches between 'candles_*' (default), the FX/CFD source's own tables, and prop firm tables.
 export function formatPairForTable(
   pairStr: string,
   dataSource: 'default' | 'oanda' | 'ftmo' | 'prop',
   getTableNameFromMap: (symbol: string) => string | null
 ): string {
-  // 'oanda' source: use oanda_* views (e.g., oanda_xau_usd)
+  // The FX/CFD source: its own views, one per pair, named with its prefix
   if (dataSource === 'oanda') {
     const allQuotes = ['USD', ...FIAT_QUOTES.filter(q => q !== 'USD'), ...CRYPTO_QUOTES.filter(q => q !== 'USD')];
     for (const q of allQuotes) {
@@ -667,7 +667,7 @@ export async function fetchWindowedCandles(
 
 // Returns the pre-aggregated HTF table name for a given timeframe in minutes.
 // Returns null for custom timeframes that need RPC aggregation instead.
-// The 'oanda' source uses separate oanda_candles_* tables.
+// The FX/CFD source uses separate higher-timeframe tables of its own.
 export function getHTFTableName(
   tfMinutes: number,
   dataSource: 'default' | 'oanda'
@@ -699,7 +699,7 @@ export function getDailyTableName(
 
 // ─── FX/CFD HTF Fetcher ────────────────────────────────────────────────────────
 
-// Generic FX/CFD HTF fetcher: queries oanda_candles_* tables with symbol filter.
+// Generic FX/CFD HTF fetcher: queries the FX/CFD source's higher-timeframe tables with a symbol filter.
 // Tries multiple symbol variants (BTC/USD, BTCUSD, BTC) to find a match.
 export async function fetchOandaHtf(
   table: string,

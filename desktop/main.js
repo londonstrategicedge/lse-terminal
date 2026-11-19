@@ -3,7 +3,13 @@
 // spawn on a free localhost port, wait for /api/health, show the window,
 // kill the sidecar on quit. No browser chrome, single instance, window
 // bounds remembered across runs.
-const { app, BrowserWindow, Menu, dialog, shell, nativeTheme, ipcMain } = require("electron");
+//
+// More than one window: the terminal can be spread over monitors. The main
+// window is the app (closing it closes everything); the page's NEW WINDOW
+// button, or a Ctrl-click on one of its tabs, asks for another window on the
+// same engine, showing the view it names. Every window's place and view is
+// remembered and comes back at the next launch.
+const { app, BrowserWindow, Menu, dialog, shell, nativeTheme, ipcMain, screen } = require("electron");
 
 // The native Windows title bar follows the OS theme and shipped white, which
 // clashed with the near-black app chrome. Pro-terminal black top bar: pin
@@ -37,19 +43,120 @@ const APP_TITLE = IS_DEMO ? "LSE Demo Terminal" : "LSE Terminal";
 const CONFIG_DIR = path.join(os.homedir(), ".config", IS_DEMO ? "lse-terminal-demo" : "lse-terminal");
 
 let sidecar = null;
-let win = null;
+let win = null;                 // the main window
+const extras = new Map();       // id ("w2", "w3", ...) -> the other windows
+const MAX_EXTRA_WINDOWS = 8;
+let stateSaved = false;         // the closing-down save is made once
 
 const stateFile = () => path.join(app.getPath("userData"), "window-state.json");
 
+// window-state.json: the main window's bounds at the top level (as every
+// earlier version wrote them, so an older shell still reads its own part),
+// plus `maximized` and `windows`, one {id, x, y, width, height, maximized,
+// view} per other window open when the app closed.
 function loadWindowState() {
-  try { return JSON.parse(fs.readFileSync(stateFile(), "utf8")); }
-  catch { return { width: 1440, height: 900 }; }
+  try {
+    const s = JSON.parse(fs.readFileSync(stateFile(), "utf8"));
+    return s && typeof s === "object" ? s : { width: 1440, height: 900 };
+  } catch { return { width: 1440, height: 900 }; }
+}
+
+function allWindows() {
+  return [win, ...extras.values()].filter((w) => w && !w.isDestroyed());
+}
+
+// A maximized window is remembered by the bounds it returns to, so it comes
+// back maximized on the same monitor and restores to the size it had.
+function boundsOf(w) {
+  const b = w.isMaximized() || w.isFullScreen() ? w.getNormalBounds() : w.getBounds();
+  return { x: b.x, y: b.y, width: b.width, height: b.height };
+}
+
+// The view a window shows: the page keeps it in its own address (?view=).
+function viewOf(w) {
+  try { return new URL(w.webContents.getURL()).searchParams.get("view") || ""; }
+  catch { return ""; }
 }
 
 function saveWindowState() {
-  if (!win) return;
-  try { fs.writeFileSync(stateFile(), JSON.stringify(win.getBounds())); }
-  catch { /* best effort */ }
+  if (!win || win.isDestroyed()) return;
+  try {
+    const state = { ...boundsOf(win), maximized: win.isMaximized(), windows: [] };
+    for (const [id, w] of extras) {
+      if (w.isDestroyed()) continue;
+      state.windows.push({ id, ...boundsOf(w), maximized: w.isMaximized(), view: viewOf(w) });
+    }
+    fs.writeFileSync(stateFile(), JSON.stringify(state));
+  } catch { /* best effort */ }
+}
+
+// The arrangement is written as it changes (a window moved, resized, opened
+// or closed, a view changed), a moment after the change, and once more as
+// the app closes. It must not hang on the main window's `close` event
+// alone: a window can go without one (a close that starts inside the page,
+// a renderer that dies), and the arrangement of the last hour would go
+// with it.
+let saveTimer = null;
+function scheduleSave() {
+  if (stateSaved || app.isQuitting) return;
+  if (saveTimer) clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    saveTimer = null;
+    if (!stateSaved && !app.isQuitting) saveWindowState();
+  }, 400);
+}
+
+// Is enough of these bounds on a monitor that is connected now? A window
+// remembered on a monitor since unplugged must not open where nobody can
+// reach it.
+function onScreen(b) {
+  if (!b || ![b.x, b.y, b.width, b.height].every(Number.isFinite)) return false;
+  return screen.getAllDisplays().some((d) => {
+    const a = d.workArea;
+    const w = Math.min(b.x + b.width, a.x + a.width) - Math.max(b.x, a.x);
+    const h = Math.min(b.y + b.height, a.y + a.height) - Math.max(b.y, a.y);
+    return w >= 200 && h >= 120;
+  });
+}
+
+// Remembered bounds made safe to open at: the remembered place when it is
+// still on a monitor, else only the size (the OS then centres the window).
+function placed(saved) {
+  const size = (v, lo, fallback) => (Number.isFinite(v) ? Math.max(lo, Math.min(16000, Math.round(v))) : fallback);
+  const width = size(saved && saved.width, 980, 1440), height = size(saved && saved.height, 600, 900);
+  const at = { x: Math.round(saved && saved.x), y: Math.round(saved && saved.y), width, height };
+  return onScreen(at) ? at : { width, height };
+}
+
+// Where a new window goes: filling a monitor that has none of the
+// terminal's windows yet (the reason to open one), else a step down and
+// right of the window it was opened from.
+function newWindowBounds(opener) {
+  const used = new Set(allWindows().map((w) => screen.getDisplayMatching(w.getBounds()).id));
+  const free = screen.getAllDisplays().find((d) => !used.has(d.id));
+  if (free) {
+    const a = free.workArea;
+    const width = Math.min(1440, a.width), height = Math.min(900, a.height);
+    return { x: a.x + Math.round((a.width - width) / 2), y: a.y + Math.round((a.height - height) / 2),
+             width, height, maximized: true };
+  }
+  const from = opener && !opener.isDestroyed() ? boundsOf(opener) : { x: 80, y: 80, width: 1440, height: 900 };
+  const a = screen.getDisplayMatching(from).workArea;
+  const width = Math.min(from.width, a.width), height = Math.min(from.height, a.height);
+  let x = from.x + 36, y = from.y + 36;
+  if (x + width > a.x + a.width) x = a.x;
+  if (y + height > a.y + a.height) y = a.y;
+  return { x, y, width, height };
+}
+
+// The address a window loads: the main window is the plain page; another
+// window names itself and its view, and the page opens on that view.
+function windowUrl(id, view) {
+  const q = new URLSearchParams();
+  if (id !== "main") q.set("win", id);
+  if (view) q.set("view", view);
+  const qs = q.toString();
+  return `http://127.0.0.1:${currentPort}/` + (qs ? "?" + qs : "");
 }
 
 // Dev override: a ~/.lse-terminal-dev.json file ({"command": ..., "args":
@@ -198,8 +305,7 @@ let autoUpdater = null;   // null = this build has no updater (dev, mac, no dep)
 const updateState = { phase: "idle", pct: 0, latest: "", available: false };
 
 function sendUpdateState() {
-  if (!win || win.isDestroyed()) return;
-  win.webContents.send("lse-update-state", updateSnapshot());
+  for (const w of allWindows()) w.webContents.send("lse-update-state", updateSnapshot());
 }
 
 function updateSnapshot() {
@@ -345,9 +451,10 @@ function spawnSidecar() {
       if (app.isQuitting || !win) return;
       currentPort = await findFreePort(currentPort, 20);
       spawnSidecar();
-      // Point the window at the restarted engine (the port may have moved).
+      // Point every window at the restarted engine (the port may have
+      // moved), each back on the view it showed.
       waitForHealth(currentPort, 30000)
-        .then(() => win && win.loadURL(`http://127.0.0.1:${currentPort}/`))
+        .then(() => { for (const w of allWindows()) w.loadURL(windowUrl(w.lseId, viewOf(w))).catch(() => {}); })
         .catch(() => {});
     } else {
       dialog.showErrorBox(APP_TITLE,
@@ -364,10 +471,50 @@ function spawnSidecar() {
 // one is also taken shortly after boot so a first turn never finds nothing.
 const AI_WS = path.join(CONFIG_DIR, "ai-workspace");
 
-async function captureToWorkspace() {
-  if (!win) return { ok: false };
+// Whether the engine allows a snapshot now. A broker's terms can keep its
+// prices on this computer (Brue Connect SPEC 3.3), and a picture of the window
+// reproduces them, so while such a broker may be on screen the engine says no,
+// with the sentence why, and removes any older snapshot itself. An engine from
+// before the rule answers 404 and the shell captures as it always did; an
+// engine that does not answer gets no snapshot this time.
+function captureAllowed() {
+  return new Promise((resolve) => {
+    const req = http.get({ host: "127.0.0.1", port: currentPort,
+                           path: "/api/ai/capture-allowed", timeout: 1500 }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c) => { body += c; });
+      res.on("end", () => {
+        if (res.statusCode === 404) return resolve({ allowed: true });
+        if (res.statusCode !== 200) return resolve({ allowed: false, reason: `engine answered ${res.statusCode}` });
+        try {
+          const d = JSON.parse(body);
+          resolve({ allowed: d.allowed === true, reason: d.reason || "" });
+        } catch (e) {
+          resolve({ allowed: false, reason: "engine answer unreadable" });
+        }
+      });
+    });
+    req.on("error", () => resolve({ allowed: false, reason: "engine not answering" }));
+    req.on("timeout", () => { req.destroy(); resolve({ allowed: false, reason: "engine not answering" }); });
+  });
+}
+
+async function captureToWorkspace(target) {
+  // The window that asked (the one whose assistant is about to answer);
+  // the main window for the snapshot taken at boot.
+  const open = (w) => !!w && !(typeof w.isDestroyed === "function" && w.isDestroyed());
+  const shot = open(target) ? target : win;
+  if (!open(shot)) return { ok: false };
+  const gate = await captureAllowed();
+  if (!gate.allowed) {
+    // Nothing written. An older snapshot is removed too, so no agent reads a
+    // picture the terms keep on this computer.
+    try { fs.rmSync(path.join(AI_WS, "chart.png"), { force: true }); } catch (e) { /* nothing there */ }
+    return { ok: false, withheld: true, error: gate.reason };
+  }
   try {
-    const img = await win.webContents.capturePage();
+    const img = await shot.webContents.capturePage();
     fs.mkdirSync(AI_WS, { recursive: true });
     // Write-then-rename: an agent reading mid-capture must never see a
     // half-written PNG.
@@ -379,21 +526,15 @@ async function captureToWorkspace() {
     return { ok: false, error: String(e) };
   }
 }
-ipcMain.handle("lse-capture", captureToWorkspace);
+ipcMain.handle("lse-capture", (event) => captureToWorkspace(BrowserWindow.fromWebContents(event.sender)));
 
-async function start() {
-  recordEngineOutput(`[shell] boot: version=${app.getVersion()} packaged=${app.isPackaged} appPath=${app.getAppPath()}\n`);
-  // Before the first spawn: the sidecar inherits this process's env, so the
-  // PATH repair has to land before anything is launched from it.
-  fixMacPath();
-  recordEngineOutput(`[shell] PATH=${process.env.PATH}\n`);
-  currentPort = await findFreePort(PREFERRED_PORT, 20);
-  spawnSidecar();
-  const port = currentPort;
-
-  const bounds = loadWindowState();
-  win = new BrowserWindow({
-    ...bounds,
+// One window of the terminal. `id` is "main" or an extra's name.
+function makeWindow(id, bounds) {
+  const b = bounds || {};
+  const w = new BrowserWindow({
+    ...(Number.isFinite(b.x) && Number.isFinite(b.y) ? { x: b.x, y: b.y } : {}),
+    width: b.width || 1440,
+    height: b.height || 900,
     minWidth: 980,
     minHeight: 600,
     title: APP_TITLE,
@@ -407,19 +548,102 @@ async function start() {
     webPreferences: { contextIsolation: true, nodeIntegration: false,
                       preload: path.join(__dirname, "preload.js") },
   });
+  w.lseId = id;
+  for (const ev of ["resize", "move", "maximize", "unmaximize"]) w.on(ev, scheduleSave);
+  // the page keeps its view in its address (?view=): a change of view is a
+  // same-page navigation
+  w.webContents.on("did-navigate-in-page", scheduleSave);
+  w.webContents.on("did-navigate", scheduleSave);
   // The page names itself "... · LSE Terminal" in document.title; the demo
   // app rewrites that so the title bar and taskbar say which app this is.
-  win.on("page-title-updated", (e, title) => {
+  w.on("page-title-updated", (e, title) => {
     if (!IS_DEMO) return;
     e.preventDefault();
-    win.setTitle(title.replace(/LSE Terminal/g, APP_TITLE));
+    w.setTitle(title.replace(/LSE Terminal/g, APP_TITLE));
   });
-  win.on("close", saveWindowState);
-  win.on("closed", () => { win = null; });
-  // External links (docs, key signup) open in the user's real browser.
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+  // The terminal's own page asked for (window.open of the engine's root):
+  // another window of the terminal. Everything else (docs, key signup, a
+  // paper) opens in the user's real browser, as before.
+  w.webContents.setWindowOpenHandler(({ url }) => {
+    let own = null;
+    try {
+      const u = new URL(url);
+      if (u.protocol === "http:" && u.hostname === "127.0.0.1" &&
+          Number(u.port) === currentPort && u.pathname === "/") own = u;
+    } catch { /* not an address: the browser gets to say so */ }
+    if (own) openExtra(own.searchParams.get("view") || "", w);
+    else shell.openExternal(url);
     return { action: "deny" };
+  });
+  // A renderer that dies (Chromium CHECK, OOM, GPU reset) used to leave the
+  // shell standing with an empty black window until someone relaunched the
+  // app; seen twice on macOS 26 with Electron 31 (SIGTRAP on CrRendererMain
+  // while idle). Reload the page instead: the engine sidecar is untouched, so
+  // the terminal is back in about a second. Backed off so a renderer that
+  // dies on every load cannot spin the CPU.
+  let rendererRestarts = 0;
+  w.webContents.on("render-process-gone", (_e, details) => {
+    recordEngineOutput(`[shell] renderer gone (${id}): ${details.reason} (exit ${details.exitCode}); reloading\n`);
+    if (details.reason === "clean-exit" || w.isDestroyed()) return;
+    const delay = Math.min(30000, 1000 * 2 ** rendererRestarts++);
+    setTimeout(() => { if (!w.isDestroyed()) w.webContents.reload(); }, delay);
+  });
+  w.webContents.on("did-finish-load", () => { rendererRestarts = 0; });
+  return w;
+}
+
+// Another window, on `view`. `saved` is a remembered window being brought
+// back; otherwise the window is new and placed by newWindowBounds.
+function openExtra(view, opener, saved) {
+  if (extras.size >= MAX_EXTRA_WINDOWS) return null;
+  let id = saved && typeof saved.id === "string" && /^w[0-9]{1,3}$/.test(saved.id) && !extras.has(saved.id)
+    ? saved.id : "";
+  for (let n = 2; !id; n++) if (!extras.has("w" + n)) id = "w" + n;
+  const b = saved ? { ...placed(saved), maximized: !!saved.maximized } : newWindowBounds(opener);
+  const w = makeWindow(id, b);
+  extras.set(id, w);
+  recordEngineOutput(`[shell] window ${id} opened on ${view || "markets"}\n`);
+  w.on("closed", () => {
+    extras.delete(id);
+    // Closed by the user while the app runs on: it is not brought back.
+    if (!stateSaved && !app.isQuitting) saveWindowState();
+  });
+  w.once("ready-to-show", () => {
+    if (b.maximized) w.maximize();
+    w.show();
+    scheduleSave();
+  });
+  w.loadURL(windowUrl(id, typeof view === "string" ? view.slice(0, 80) : "")).catch(() => {});
+  return w;
+}
+
+// The page's NEW WINDOW button and its Ctrl-clicked tabs (preload.js).
+ipcMain.handle("lse-window-open", (event, view) => {
+  const w = openExtra(typeof view === "string" ? view : "", BrowserWindow.fromWebContents(event.sender));
+  return { ok: !!w, reason: w ? "" : "limit" };
+});
+
+async function start() {
+  recordEngineOutput(`[shell] boot: version=${app.getVersion()} packaged=${app.isPackaged} appPath=${app.getAppPath()}\n`);
+  // Before the first spawn: the sidecar inherits this process's env, so the
+  // PATH repair has to land before anything is launched from it.
+  fixMacPath();
+  recordEngineOutput(`[shell] PATH=${process.env.PATH}\n`);
+  currentPort = await findFreePort(PREFERRED_PORT, 20);
+  spawnSidecar();
+  const port = currentPort;
+
+  const saved = loadWindowState();
+  win = makeWindow("main", placed(saved));
+  win.on("close", () => {
+    // Closing the main window closes the app: remember every window first,
+    // while the others are still open.
+    if (!stateSaved) { saveWindowState(); stateSaved = true; }
+  });
+  win.on("closed", () => {
+    win = null;
+    app.isQuitting = true;
+    for (const w of [...extras.values()]) { if (!w.isDestroyed()) w.destroy(); }
   });
 
   try {
@@ -433,23 +657,16 @@ async function start() {
     return;
   }
   await win.webContents.session.clearCache();
-  // A renderer that dies (Chromium CHECK, OOM, GPU reset) used to leave the
-  // shell standing with an empty black window until someone relaunched the
-  // app; seen twice on macOS 26 with Electron 31 (SIGTRAP on CrRendererMain
-  // while idle). Reload the page instead: the engine sidecar is untouched, so
-  // the terminal is back in about a second. Backed off so a renderer that
-  // dies on every load cannot spin the CPU.
-  let rendererRestarts = 0;
-  win.webContents.on("render-process-gone", (_e, details) => {
-    recordEngineOutput(`[shell] renderer gone: ${details.reason} (exit ${details.exitCode}); reloading\n`);
-    if (details.reason === "clean-exit" || !win || win.isDestroyed()) return;
-    const delay = Math.min(30000, 1000 * 2 ** rendererRestarts++);
-    setTimeout(() => { if (win && !win.isDestroyed()) win.webContents.reload(); }, delay);
-  });
-  win.webContents.on("did-finish-load", () => { rendererRestarts = 0; });
-  await win.loadURL(`http://127.0.0.1:${port}/`);
+  await win.loadURL(windowUrl("main", ""));
+  if (saved.maximized) win.maximize();
   win.show();
-  setTimeout(captureToWorkspace, 6000); // first snapshot once the chart is up
+  // The other windows, where they were and on the views they showed.
+  for (const other of (Array.isArray(saved.windows) ? saved.windows : []).slice(0, MAX_EXTRA_WINDOWS)) {
+    if (other && typeof other === "object") {
+      openExtra(typeof other.view === "string" ? other.view : "", win, other);
+    }
+  }
+  setTimeout(() => captureToWorkspace(win), 6000); // first snapshot once the chart is up
   setupAutoUpdate();
 }
 
@@ -458,11 +675,16 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on("second-instance", () => {
-    if (win) { if (win.isMinimized()) win.restore(); win.focus(); }
+    if (win && !win.isDestroyed()) { if (win.isMinimized()) win.restore(); win.focus(); }
   });
   app.whenReady().then(start);
 }
 
-app.on("before-quit", () => { app.isQuitting = true; });
+app.on("before-quit", () => {
+  // Quit from the taskbar or an update: remember the windows while they are
+  // all still open (the main window's own close does the same).
+  if (!stateSaved) { saveWindowState(); stateSaved = true; }
+  app.isQuitting = true;
+});
 app.on("will-quit", () => { if (sidecar) sidecar.kill(); });
 app.on("window-all-closed", () => app.quit());

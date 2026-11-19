@@ -1,0 +1,15 @@
+{
+  "version": "0.1.12",
+  "python": "3.11.9",
+  "sdk_version": "0.14.0",
+  "sdk": {
+    "__init__.py": "5ee07b174840ca5042bc00b3a836f7765974f04ff94ff9b375783325aa03a213",
+    "client.py": "eed9bd8befce1a679c891ebac41c6c3a7bb92e261263954b944c2197ce6e0715",
+    "vault.py": "be31cc1b28954aca1a47fe113c3a54c67a69b8d4c65063c9824915bc882456d1"
+  },
+  "brue_adapter_sha256": "eb13d799e67098802150daa10f79f1ed9f84565df0ef1fe439674fe1e7725109",
+  "source_baseline_modules": 139,
+  "native_modules": 142,
+  "source_snapshot": "all-module-fingerprints.json",
+  "native_snapshot": "native-module-fingerprints.json"
+}

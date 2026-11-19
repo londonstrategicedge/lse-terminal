@@ -40,7 +40,7 @@ export function getEngineContext(): EngineContext {
 //
 // Upstream naming falls into two shapes:
 //   - per-pair minute tables:  candles_btcusd, candles_xauusd   -> 1m
-//   - pre-aggregated HTF:      x_candles_5m, oanda_candles_1h   -> that suffix
+//   - pre-aggregated HTF:      x_candles_5m, <prefix>_candles_1h -> that suffix
 //   - sub-minute:              candles_5s, candles_100ticks     -> that suffix
 // Anything unrecognised falls back to 1m, which matches the upstream default
 // for per-pair tables rather than inventing a new behaviour.

@@ -40,10 +40,24 @@ and traded, and a strategy can attach any series as alternative data with
 `use NAME`, from economic releases to your own imports.
 
 **Execution.** Orders go through
-[Brue Connect](https://github.com/londonstrategicedge/brue-connect). Each
-broker has an adapter and your broker login never leaves your computer. The
-LSE demo account is the first adapter. Positions, fills and P&L show in the
-ticket and the assistant can read them.
+[Brue Connect](https://github.com/londonstrategicedge/brue/blob/main/BRUE_CONNECT.md),
+the broker kit that ships with Brue. Each broker has an adapter,
+a small program on your computer. Your broker keys are kept on your
+computer, handed only to that adapter and never sent to London Strategic
+Edge. The terminal comes with the LSE demo account and adapters for the
+brokers it supports. For any other broker, "+ Add your own broker" on the Connections
+screen writes a starter adapter that you fill in with your broker's API
+calls; the guide in the app takes you through it step by step. Positions,
+fills and P&L show in the ticket and the assistant can read them.
+
+**Dashboards.** Boards of widgets you write yourself. A widget is a few
+lines of JavaScript that reads the terminal's data and draws it: candles,
+prices, option chains, economic series, your own files. Each widget runs in
+a sandbox that can read data and nothing else.
+
+**Windows.** Any view opens in a window of its own, so the chart can sit on
+one monitor and the workspace on another. The app remembers where each
+window was and reopens it there.
 
 **Brue.** You can also write indicators and entry rules in
 [Brue](https://github.com/londonstrategicedge/brue), a small language that
@@ -70,21 +84,32 @@ You need Python 3.10 or newer and Node 20 or newer.
 ```
 git clone https://github.com/londonstrategicedge/lse-terminal.git
 git clone https://github.com/londonstrategicedge/brue.git
-git clone https://github.com/londonstrategicedge/brue-connect.git
 cd lse-terminal
 python -m venv .venv
-.venv/bin/pip install -e ../brue -e ../brue-connect -e .
+.venv/bin/pip install -e ../brue -e ".[dev]"
 .venv/bin/lset
 ```
 
-`lset` starts the engine and opens the terminal in a browser tab. The
-installers are built with `desktop/build-mac.sh` and
-`desktop/build-win.ps1`. Tests: `.venv/bin/python -m pytest tests/`
+`brue` holds the Brue language and Brue Connect, the broker kit. Without the
+clone, `pip install -e ".[dev]"` takes the same from PyPI (`brue-language`).
+If an earlier setup left a `brue-connect` folder next to this one, remove it
+and run `.venv/bin/pip uninstall brue-connect`, so the Brue Connect inside
+Brue is the one used.
+
+`lset` starts the engine and opens the terminal in a browser tab. Tests:
+`.venv/bin/python -m pytest tests/`, and the screen's own checks with
+`for f in tests/test_*.mjs; do node "$f"; done`.
+
+The installers are built with `desktop/build-mac.sh` and
+`desktop/build-win.ps1`. `build-win.ps1` uses the Python given by `-Python`,
+which must be 3.11.9 with this package, Brue (`pip install -e ../brue -e .`)
+and PyInstaller installed; it checks those inputs first
+(`desktop/release_build_guard.py`).
 
 ## Files
 
 `~/.config/lse-terminal/` has the key, imported data, workspace, indicators,
-notebooks and assistant chats.
+notebooks, dashboards and assistant chats.
 
 ## Licence
 

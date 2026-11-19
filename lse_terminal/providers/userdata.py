@@ -13,6 +13,10 @@ CSV exported from any broker or spreadsheet drops in unchanged.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
+import threading
+from functools import wraps
 import re
 import time
 from io import StringIO
@@ -44,6 +48,17 @@ _FIELD_ALIASES = {
 }
 
 
+STORE_LOCK = threading.RLock()
+
+
+def _store_locked(fn):
+    @wraps(fn)
+    def locked(*args, **kwargs):
+        with STORE_LOCK:
+            return fn(*args, **kwargs)
+    return locked
+
+
 class ImportError_(Exception):
     """User-facing import problem (bad columns, unparseable times)."""
 
@@ -56,6 +71,7 @@ def _manifest_path() -> Path:
     return data_dir() / "manifest.json"
 
 
+@_store_locked
 def load_manifest() -> dict:
     try:
         return json.loads(_manifest_path().read_text())
@@ -63,9 +79,18 @@ def load_manifest() -> dict:
         return {}
 
 
+@_store_locked
 def _save_manifest(m: dict) -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
-    _manifest_path().write_text(json.dumps(m, indent=2) + "\n")
+    fd, name = tempfile.mkstemp(prefix=".manifest-", suffix=".tmp", dir=data_dir())
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(json.dumps(m, indent=2) + "\n")
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(name, _manifest_path())
+    finally:
+        Path(name).unlink(missing_ok=True)
 
 
 def _slug(symbol: str) -> str:
@@ -335,6 +360,7 @@ def preview_csv(text: str) -> dict:
     }
 
 
+@_store_locked
 def import_csv(symbol: str, text: str, name: str = "", folder: str = "",
                kind: str = "") -> dict:
     """Normalize + store one dataset; returns its manifest entry.
@@ -392,6 +418,7 @@ def import_csv(symbol: str, text: str, name: str = "", folder: str = "",
     return entry
 
 
+@_store_locked
 def import_table(symbol: str, raw: pd.DataFrame, name: str = "",
                  folder: str = "", kind: str = "", source_ext: str = ".csv") -> dict:
     """Import an already-decoded table (any format). Same semantics as
@@ -479,6 +506,7 @@ def available_samples() -> list[dict]:
     return out
 
 
+@_store_locked
 def import_sample(symbol: str) -> dict | None:
     """Import one bundled sample into the user's library; idempotent (an
     already-imported symbol just returns its entry). None if no such sample."""
@@ -503,6 +531,7 @@ def import_sample(symbol: str) -> dict | None:
     return None
 
 
+@_store_locked
 def seed_samples() -> None:
     """First-run only: preload the bundled sample datasets so a fresh
     download can chart and backtest immediately, with zero imports and no
@@ -533,6 +562,7 @@ def seed_samples() -> None:
             continue
 
 
+@_store_locked
 def update_dataset(symbol: str, name: str | None = None,
                    folder: str | None = None) -> dict | None:
     """Rename / move-to-folder; returns the updated entry or None."""
@@ -555,6 +585,7 @@ def dataset_path(symbol: str):
     return data_dir() / entry["file"]
 
 
+@_store_locked
 def delete_dataset(symbol: str) -> bool:
     manifest = load_manifest()
     entry = manifest.pop(symbol, None)
@@ -654,11 +685,13 @@ def load_folders() -> list[str]:
     return sorted(out)
 
 
+@_store_locked
 def _save_folders(folders: set[str]) -> None:
     data_dir().mkdir(parents=True, exist_ok=True)
     _folders_path().write_text(json.dumps(sorted(folders)) + "\n")
 
 
+@_store_locked
 def create_folder(path: str) -> list[str]:
     path = path.strip().strip("/")
     if not path:
@@ -674,6 +707,7 @@ def create_folder(path: str) -> list[str]:
     return load_folders()
 
 
+@_store_locked
 def rename_folder(path: str, new_path: str) -> list[str]:
     path = path.strip().strip("/")
     new_path = new_path.strip().strip("/")
@@ -700,6 +734,7 @@ def rename_folder(path: str, new_path: str) -> list[str]:
     return load_folders()
 
 
+@_store_locked
 def delete_folder(path: str) -> list[str]:
     """Delete a folder; its datasets (and subfolder datasets) move up to the
     parent so nothing is ever destroyed by a folder delete."""

@@ -20,10 +20,41 @@ try {
 // their panels render light on a dark app (seen on QUANT MODELS cards).
 document.documentElement.setAttribute("data-theme",
   document.documentElement.classList.contains("dark") ? "dark" : "light");
+// This window's name. The terminal can be open in several windows (one per
+// monitor); the address says which this is (?win=) and which view it opened
+// on (?view=), and `token` is new for every page load. Every request the
+// page makes to the engine carries the token in X-LSE-Window, the chart
+// bundle's requests included (hence here, before any other script): the
+// engine merges this window's saves with what the other windows saved
+// (engine/workspace.py) and keeps each window's broker subscriptions apart.
+// Engine requests only (a path under /api/), so no other host ever sees it.
+(function () {
+  var id = "main", view = "";
+  try {
+    var q = new URLSearchParams(location.search);
+    id = (q.get("win") || "main").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 24) || "main";
+    view = q.get("view") || "";
+  } catch (e) { /* no address to read: the one window there always was */ }
+  var token = id + "." + Math.random().toString(36).slice(2, 10);
+  window.__lseWin = { id: id, token: token, view: view };
+  var plain = window.fetch;
+  if (typeof plain !== "function" || typeof Headers !== "function") return;
+  window.fetch = function (input, init) {
+    try {
+      if (typeof input === "string" && input.indexOf("/api/") === 0) {
+        var headers = new Headers((init && init.headers) || {});
+        if (!headers.has("X-LSE-Window")) headers.set("X-LSE-Window", token);
+        init = Object.assign({}, init || {}, { headers: headers });
+      }
+    } catch (e) { /* send it as it was */ }
+    return plain.call(window, input, init);
+  };
+})();
 </script>
 <title>LSE Terminal</title>
 <link rel="stylesheet" href="./style.css">
 <link rel="stylesheet" href="./chart/chart.css">
+<link rel="stylesheet" href="./dash/dash.css">
 <script src="./vendor/lightweight-charts.4.2.0.js"></script>
 <link rel="stylesheet" href="./vendor/xterm.css">
 <script src="./vendor/xterm.js"></script>
@@ -84,6 +115,12 @@ document.documentElement.setAttribute("data-theme",
          the rail handlers and the hosted-mode sweeps in app.js never see
          it. -->
     <a id="github-btn" href="https://github.com/londonstrategicedge/lse-terminal" target="_blank" rel="noopener" title="LSE Terminal on GitHub" aria-label="LSE Terminal on GitHub"><svg viewBox="0 0 16 16" width="14" height="14" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg><span>GITHUB</span></a>
+    <!-- NEW WINDOW: this view in a window of its own, for a second monitor.
+         Icon and word, like the GitHub link beside it (an icon alone gets
+         missed in a cluster of words). Not a .rail-btn: it opens a window,
+         it is not a section. app.js setupWindows() wires it and hides it on
+         the hosted page. -->
+    <button id="win-new" title="Open this view in a new window (Ctrl+Shift+N). Ctrl-click any tab to open that tab in a new window." aria-label="Open this view in a new window"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><rect x="1.7" y="4.7" width="9.6" height="9.6" rx="1"/><path d="M4.7 4.7V2.7a1 1 0 0 1 1-1h7.6a1 1 0 0 1 1 1v7.6a1 1 0 0 1-1 1h-2"/></svg><span>NEW WINDOW</span></button>
     <button id="theme-toggle" title="Switch between light and dark">&#9728;&#65039;</button>
   </div>
   <!-- Pro-terminal secondary bar: the active section's sub-views,
@@ -286,6 +323,13 @@ def my_ind(df, length=20):
            equity curve; it draws no price data. -->
       <div id="chart-pro"></div>
       <div id="chart" class="hidden"></div>
+      <!-- What the chart area says when it has no bars to draw: a candle
+           request that failed (the source's own message and a Retry) or a
+           source that answered with none. Filled by chartNote in app.js. -->
+      <div id="chart-note" class="hidden" role="status" aria-live="polite"></div>
+      <!-- Older bars a broker sent after the user had moved or zoomed the
+           chart wait behind this button (chartGrow in app.js). -->
+      <button id="chart-more" class="hidden" type="button"></button>
     </div>
     <div id="panes"></div>
     <!-- Account dock: MT-style strip under the chart.
@@ -375,7 +419,9 @@ def my_ind(df, length=20):
       The key is saved in this machine's local config file and never leaves
       it. Your own imported files live under BACKTEST and MY DATA.</div>
       <div id="lse-keyline" class="ai-keyline">
-        <input id="lse-key" type="password" placeholder="lse_live_..."
+        <!-- A key box no browser offers to save: a text box masked by the
+             stylesheet (.cs-secret), never a password box (csSecretBox). -->
+        <input id="lse-key" type="text" class="cs-secret" placeholder="lse_live_..."
                spellcheck="false" autocomplete="off">
         <button id="lse-connect-btn">Connect</button>
       </div>
@@ -447,14 +493,14 @@ def my_ind(df, length=20):
   </div>
   <!-- LSE databank import (library toolbar > LSE): browse the databank catalog,
        pick an instrument or dataset, and pull its history straight into the
-       library. The engine downloads server-built Parquet via your LSE key. -->
+       library. The engine pages through supported customer reads with your LSE key. -->
   <div id="lsb-modal" class="hidden">
     <div id="lsb-card">
       <div id="lsb-head"><span>Import from LSE</span>
         <button id="lsb-close" title="Close">&times;</button></div>
-      <p class="src-help">Your LSE key unlocks the databank: the full recorded
-      history behind the platform. Pick anything below and it downloads into
-      your library as compressed Parquet, ready to chart and backtest.</p>
+      <p class="src-help">Import available market candles, economic series and
+      bond yields with your LSE key. Choose an instrument and range to add a
+      complete dataset to your library for charts and backtests.</p>
       <div id="lsb-key-hint" class="hidden">No LSE API key set. Add your free
         key under <b>MARKETS</b> first; the databank uses the same key.</div>
       <div id="lsb-body" class="hidden">
@@ -576,6 +622,11 @@ def my_ind(df, length=20):
        surface (library rail, canvas, maths palette) is the LSENotebooks
        island; documents live in ~/.config/lse-terminal/notebooks/. -->
   <section id="nbpage" class="hidden"><div id="nb-root"></div></section>
+  <!-- WORKSPACE > DASHBOARD: boards of widgets the user codes against the
+       terminal's data. dash/dash.js draws all of it; each widget's code
+       runs in a sandboxed frame (dash/widget.js) and reads data only
+       through that page's bridge. -->
+  <section id="dash" class="hidden"></section>
   <!-- MARKETS > Options: option chain + flow tape from the /api/options/*
        engine routes. Needs the LSE key; a 409 from the engine renders as a
        connect hint inside #opt-body, so the page itself always opens. -->
@@ -1061,6 +1112,32 @@ def my_ind(df, length=20):
         <div class="tpx-mcell"><span class="tpx-mlab">USED</span><span id="tpx-mused">–</span></div>
       </div>
       <div id="tpx-msg"></div>
+      <!-- Shown while a request's answer was lost: asks the broker again
+           under the same client_id, which it answers from its own record
+           and never carries out twice (tpxHold). -->
+      <button id="tpx-again" class="hidden" type="button"
+              title="Ask the broker again about it. It is answered from the broker's own record and is not sent twice.">Ask again</button>
+      <!-- Beside it once asking again was answered that the order's fate is
+           still not known: places the same order again under a new
+           client_id, after a yes; the first stays held (tpxPlaceNew). -->
+      <button id="tpx-new" class="hidden" type="button"
+              title="Place the same order again as a new one. The broker may still carry out the first: you are asked first.">Place as new</button>
+      <!-- Shown while the line names a request held on another connected
+           broker than the ticket's: points the ticket at that broker, which
+           then holds it as its own (tpxShowBroker). -->
+      <button id="tpx-show" class="hidden" type="button"
+              title="Point the ticket at the broker this request is held on.">Show</button>
+      <!-- Shown while the line names a request held on a broker that is not
+           connected (after an engine restart nothing is): connects it as its
+           card's Connect does, which puts the ticket on it and holds the
+           request again (tpxConnectHeld). -->
+      <button id="tpx-conn" class="hidden" type="button"
+              title="Connect the broker this request is held on. The ticket then holds it again, with Ask again.">Connect</button>
+      <!-- Shown when Ask again was refused because the broker's profile is now
+           on another account than the one the request went out on: switches
+           back to that account, then Ask again works as usual (tpxSwitchBack). -->
+      <button id="tpx-back" class="hidden" type="button"
+              title="Switch this broker back to the account the request went out on.">Switch back</button>
     </div>
     <!-- The ticket/assistant resize sash is GONE:
          it existed so a long ticket positions list could be
@@ -1210,5 +1287,6 @@ def my_ind(df, length=20):
 <!-- The old #ai-panel Assistant slide-over is gone: the hosted assistant is
      now the "LSE Assistant" provider inside the permanent right rail. -->
 <script src="./app.js"></script>
+<script src="./dash/dash.js"></script>
 </body>
 </html>

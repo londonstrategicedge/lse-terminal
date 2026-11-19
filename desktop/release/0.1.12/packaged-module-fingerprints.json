@@ -1,0 +1,1395 @@
+{
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "rows": [
+    {
+      "module": "lse_terminal.cli",
+      "source": "cli.py",
+      "bundled": true,
+      "installed_code": "3bb7ed95d46872f1be7a3cdb6f412b3024d9a2020a92192684c9c8b7cc77c43c",
+      "source_code": "3bb7ed95d46872f1be7a3cdb6f412b3024d9a2020a92192684c9c8b7cc77c43c",
+      "equal": true,
+      "source_sha256": "7c9f1fa3f5b44fbe4a15cd1e037f89d82809bd53518c29a0214d43e71e840c76"
+    },
+    {
+      "module": "lse_terminal.testing",
+      "source": "testing.py",
+      "bundled": true,
+      "installed_code": "6cba13d4912c205df1c4fd09cc7e4df1bdd5f8a7ee64a4cb4f82dbb01a612952",
+      "source_code": "6cba13d4912c205df1c4fd09cc7e4df1bdd5f8a7ee64a4cb4f82dbb01a612952",
+      "equal": true,
+      "source_sha256": "f916eafa94664f6cd9a114e06a82f94a91476d7295f4a157cdd39608dcdf3e78"
+    },
+    {
+      "module": "lse_terminal",
+      "source": "__init__.py",
+      "bundled": true,
+      "installed_code": "ef68c1d4cd0cb851e46b6afecf387866735810087d6e41139f4347949054cdef",
+      "source_code": "ef68c1d4cd0cb851e46b6afecf387866735810087d6e41139f4347949054cdef",
+      "equal": true,
+      "source_sha256": "d0375ebc846ac78acb79429337aa6a8577942bdc5c73a7cf288c61ebb2897ff2"
+    },
+    {
+      "module": "lse_terminal.backtest.contract",
+      "source": "backtest\\contract.py",
+      "bundled": true,
+      "installed_code": "7287d39cb5c3eb44b5c3156c58af548d3848d3b4ae1dec26b90ffc74fbd0c2d5",
+      "source_code": "7287d39cb5c3eb44b5c3156c58af548d3848d3b4ae1dec26b90ffc74fbd0c2d5",
+      "equal": true,
+      "source_sha256": "cbb35792800b37eb36218e853bc4e5a9c230bbf3e411b6c5bd01a70922be21f4"
+    },
+    {
+      "module": "lse_terminal.backtest.research",
+      "source": "backtest\\research.py",
+      "bundled": true,
+      "installed_code": "81ecc0d61fa4e5ee8a4d116e9ab64b94cb18e24aee052b16e96f78b7ecff4074",
+      "source_code": "81ecc0d61fa4e5ee8a4d116e9ab64b94cb18e24aee052b16e96f78b7ecff4074",
+      "equal": true,
+      "source_sha256": "b0d3dda094168163afe1042f353c35f62d09d136052fd633d7689599c8133202"
+    },
+    {
+      "module": "lse_terminal.backtest.runner",
+      "source": "backtest\\runner.py",
+      "bundled": true,
+      "installed_code": "97ebb9352f57ccb6cfa8128eb27a599ea976928fbbcd4117e9c7d035caa28ed3",
+      "source_code": "97ebb9352f57ccb6cfa8128eb27a599ea976928fbbcd4117e9c7d035caa28ed3",
+      "equal": true,
+      "source_sha256": "28db1015e20e96e4e211dce2746e90ab0665ff80bd2c7762577184470dbcc8a6"
+    },
+    {
+      "module": "lse_terminal.backtest.starters",
+      "source": "backtest\\starters.py",
+      "bundled": true,
+      "installed_code": "4ee48b4da131705079fd19f889f5016746e9389cbb4e4da858338f92bb36ea36",
+      "source_code": "4ee48b4da131705079fd19f889f5016746e9389cbb4e4da858338f92bb36ea36",
+      "equal": true,
+      "source_sha256": "0d34b46b2f51ffaef38b963bf8f4612a1a4dd08a303405f8213bff591d416750"
+    },
+    {
+      "module": "lse_terminal.backtest",
+      "source": "backtest\\__init__.py",
+      "bundled": true,
+      "installed_code": "9720d2faa32ff124c5bcd2359ce0bf3fc9ab14cc34dcbbc34c51f5e104d68f1c",
+      "source_code": "9720d2faa32ff124c5bcd2359ce0bf3fc9ab14cc34dcbbc34c51f5e104d68f1c",
+      "equal": true,
+      "source_sha256": "c74ba4c6c43426ec6756b2fc6ff1687d93d097cced94ec4992b0d51a6a796261"
+    },
+    {
+      "module": "lse_terminal.contracts.indicator",
+      "source": "contracts\\indicator.py",
+      "bundled": true,
+      "installed_code": "e0a36a4f3555c24372d1df2c358bfc8097993f35a062579af5675b9c7af65665",
+      "source_code": "e0a36a4f3555c24372d1df2c358bfc8097993f35a062579af5675b9c7af65665",
+      "equal": true,
+      "source_sha256": "5ca08ac036b8072f9d19c42d05f56d7c031d9b529bb9356ec0622d9594705a44"
+    },
+    {
+      "module": "lse_terminal.contracts.provider",
+      "source": "contracts\\provider.py",
+      "bundled": true,
+      "installed_code": "f34166f189de59b6656060e16c50e5f3345e89297123e88d3d0c54571954f830",
+      "source_code": "f34166f189de59b6656060e16c50e5f3345e89297123e88d3d0c54571954f830",
+      "equal": true,
+      "source_sha256": "6b09af722549a03fa410092f00eaa8421ae0f56bd7d14f161594cba871bb5298"
+    },
+    {
+      "module": "lse_terminal.contracts.types",
+      "source": "contracts\\types.py",
+      "bundled": true,
+      "installed_code": "a8a33dcb4180b174fdbc464bd5b007088648e1bab9d6c6ede01845c43486fe91",
+      "source_code": "a8a33dcb4180b174fdbc464bd5b007088648e1bab9d6c6ede01845c43486fe91",
+      "equal": true,
+      "source_sha256": "68e830b701d3ae8ae2584c58d786d40787b897c1fcfd425f3db51420ba31ac21"
+    },
+    {
+      "module": "lse_terminal.contracts",
+      "source": "contracts\\__init__.py",
+      "bundled": true,
+      "installed_code": "525391b00742ca2020b7c86fe11289e8274036a45ebbe0426af9585becd4cdda",
+      "source_code": "525391b00742ca2020b7c86fe11289e8274036a45ebbe0426af9585becd4cdda",
+      "equal": true,
+      "source_sha256": "3670938ab5e6be8d9cb963a6e0a408b69782b7ac7ec5610d1eb51ba4b845c320"
+    },
+    {
+      "module": "lse_terminal.engine.approve_bridge",
+      "source": "engine\\approve_bridge.py",
+      "bundled": true,
+      "installed_code": "f0fdb4a146d6df90db6868d51cf439320e04adaf75e552ee90e7115b5181aa41",
+      "source_code": "f0fdb4a146d6df90db6868d51cf439320e04adaf75e552ee90e7115b5181aa41",
+      "equal": true,
+      "source_sha256": "fbc24db5d1ee0211d5fbc03cc4d11e8462e1671fa9b6991cf9c5b036a93fb3c9"
+    },
+    {
+      "module": "lse_terminal.engine.broker_hub",
+      "source": "engine\\broker_hub.py",
+      "bundled": true,
+      "installed_code": "c160c8e19d12a61f400aa40975cac6e6b4efb80b55edd48cdf4975697725c7c3",
+      "source_code": "c160c8e19d12a61f400aa40975cac6e6b4efb80b55edd48cdf4975697725c7c3",
+      "equal": true,
+      "source_sha256": "d2baee094790fce22a0be57da6c40be09438b886728787df671745be3fdc5574"
+    },
+    {
+      "module": "lse_terminal.engine.brue_indicators",
+      "source": "engine\\brue_indicators.py",
+      "bundled": true,
+      "installed_code": "248ab8ce6f3b25b5d81dcd62093797502827caf9c5965cddc5b34b870e04c7eb",
+      "source_code": "248ab8ce6f3b25b5d81dcd62093797502827caf9c5965cddc5b34b870e04c7eb",
+      "equal": true,
+      "source_sha256": "eac9af18bc37535f4531d30dfbb8b725cd2180a07d8ec1cbacf905576ee85fca"
+    },
+    {
+      "module": "lse_terminal.engine.config",
+      "source": "engine\\config.py",
+      "bundled": true,
+      "installed_code": "5e49a188d367f3ed384b28f35b6dc05ee200a078ce409136d165a1348996b359",
+      "source_code": "5e49a188d367f3ed384b28f35b6dc05ee200a078ce409136d165a1348996b359",
+      "equal": true,
+      "source_sha256": "30097498683e5a0fbb4ef259e4e877125b081ef03a4a43d2d2217d133263f3cd"
+    },
+    {
+      "module": "lse_terminal.engine.lse_import",
+      "source": "engine\\lse_import.py",
+      "bundled": true,
+      "installed_code": "669e796085a25b46d39f7e6393cf4319002dcf8a7a5faf67a93f410684658dbf",
+      "source_code": "669e796085a25b46d39f7e6393cf4319002dcf8a7a5faf67a93f410684658dbf",
+      "equal": true,
+      "source_sha256": "c9948f9ef1ca277b273f322950b494f3739eb2237b80af15d3a828886907fb3b"
+    },
+    {
+      "module": "lse_terminal.engine.notebooks",
+      "source": "engine\\notebooks.py",
+      "bundled": true,
+      "installed_code": "cac1cb40ce733552e2fcf68eba96616b97f15f9a599eac1012f05092acd41eef",
+      "source_code": "cac1cb40ce733552e2fcf68eba96616b97f15f9a599eac1012f05092acd41eef",
+      "equal": true,
+      "source_sha256": "6f17526c8f0e90b4690022290f9a4e14698fd5cf2b89a2ac68c44a0a9a6034bf"
+    },
+    {
+      "module": "lse_terminal.engine.quant_fit",
+      "source": "engine\\quant_fit.py",
+      "bundled": true,
+      "installed_code": "200c462069e6e12a869d89421dcee36fe62ad38ee3c49ff5339108f51f258815",
+      "source_code": "200c462069e6e12a869d89421dcee36fe62ad38ee3c49ff5339108f51f258815",
+      "equal": true,
+      "source_sha256": "dbfac83c052a65211749a19394da1c0b3a274f485c36a04654794fb8f0e8271a"
+    },
+    {
+      "module": "lse_terminal.engine.registry",
+      "source": "engine\\registry.py",
+      "bundled": true,
+      "installed_code": "183aa029f356b37a77fcc6dd54b1b7067cc1bc3923548dcf1a819bbc73d76ff9",
+      "source_code": "183aa029f356b37a77fcc6dd54b1b7067cc1bc3923548dcf1a819bbc73d76ff9",
+      "equal": true,
+      "source_sha256": "c878e329fba45e08102aa4bf533fd4222f8339f619d3dd8501ab93a3ec5f25b1"
+    },
+    {
+      "module": "lse_terminal.engine.server",
+      "source": "engine\\server.py",
+      "bundled": true,
+      "installed_code": "f30278d48f6100cbb5a1a59e6e387837fffe51816dd7e2bc651a37be4ec59000",
+      "source_code": "f30278d48f6100cbb5a1a59e6e387837fffe51816dd7e2bc651a37be4ec59000",
+      "equal": true,
+      "source_sha256": "8b4eb8bfcf658034e89154ed13246aa37a3fba63e929d25bed0af8a06117fe48"
+    },
+    {
+      "module": "lse_terminal.engine.streaming",
+      "source": "engine\\streaming.py",
+      "bundled": true,
+      "installed_code": "e4192bf132764f386a5c151ea36d6409cf60048231acd9ed250707377fad7236",
+      "source_code": "e4192bf132764f386a5c151ea36d6409cf60048231acd9ed250707377fad7236",
+      "equal": true,
+      "source_sha256": "481e9b2464737ae691a225738559d673d975567e6d5df357b62c077eac08ba99"
+    },
+    {
+      "module": "lse_terminal.engine.user_indicators",
+      "source": "engine\\user_indicators.py",
+      "bundled": true,
+      "installed_code": "2d9732856df5e1daa2b47cea8baeb84288cd50da7bbd18480ee21a182c7f1d21",
+      "source_code": "2d9732856df5e1daa2b47cea8baeb84288cd50da7bbd18480ee21a182c7f1d21",
+      "equal": true,
+      "source_sha256": "2904402dad54f17d9200bc5825362301cad3fce0769c1511964a8929ffef55c2"
+    },
+    {
+      "module": "lse_terminal.engine.webtools",
+      "source": "engine\\webtools.py",
+      "bundled": true,
+      "installed_code": "5d8de7df158dac4ce16605ff6776c165e6b255cd2131dbadfe22b15ce5cf8dba",
+      "source_code": "5d8de7df158dac4ce16605ff6776c165e6b255cd2131dbadfe22b15ce5cf8dba",
+      "equal": true,
+      "source_sha256": "55f461f0168f5d8279d5bae8cd091d35fd395a81d3b7ef3e311730b2cea7fa9c"
+    },
+    {
+      "module": "lse_terminal.engine.workspace",
+      "source": "engine\\workspace.py",
+      "bundled": true,
+      "installed_code": "6f2ea8448e3b7618f3ddd037b6ea1e492111a000cc69f3a0707b9df020148f12",
+      "source_code": "6f2ea8448e3b7618f3ddd037b6ea1e492111a000cc69f3a0707b9df020148f12",
+      "equal": true,
+      "source_sha256": "6422ee5782cd9ac32ec9a3055068c547cd832e09d146bca64cb45ddf136c7570"
+    },
+    {
+      "module": "lse_terminal.engine",
+      "source": "engine\\__init__.py",
+      "bundled": true,
+      "installed_code": "099f45f750e5ad558d61e335adee0ddd1248188dd751314d6479a1b6b9403610",
+      "source_code": "099f45f750e5ad558d61e335adee0ddd1248188dd751314d6479a1b6b9403610",
+      "equal": true,
+      "source_sha256": "4e6c5138a059173f2bec5072a560dba4a396d89941906e40f6846bec423ad2d4"
+    },
+    {
+      "module": "lse_terminal.indicators.acc_bands",
+      "source": "indicators\\acc_bands.py",
+      "bundled": true,
+      "installed_code": "f324745049ff3e299c08bcc7499d0b75bbcac24652df806829537109a89b0b9f",
+      "source_code": "f324745049ff3e299c08bcc7499d0b75bbcac24652df806829537109a89b0b9f",
+      "equal": true,
+      "source_sha256": "bd31035c647df23ac6a258c9e1f786c1cf66cc61c00bc8e4e02d42df9b18741b"
+    },
+    {
+      "module": "lse_terminal.indicators.adl",
+      "source": "indicators\\adl.py",
+      "bundled": true,
+      "installed_code": "fda643e6ce0c553dc9f5b9f4ce195838209fa507833f2293ae0dbda5e5b7f036",
+      "source_code": "fda643e6ce0c553dc9f5b9f4ce195838209fa507833f2293ae0dbda5e5b7f036",
+      "equal": true,
+      "source_sha256": "65a7908478d4df448745f913ccf20461063ccc1770e23aebfa1dfe42e55bbb88"
+    },
+    {
+      "module": "lse_terminal.indicators.adx",
+      "source": "indicators\\adx.py",
+      "bundled": true,
+      "installed_code": "7aa8caf13b79da0279f21971b5a5a5eb5f0358eb6b524671c16e3f0403d67acb",
+      "source_code": "7aa8caf13b79da0279f21971b5a5a5eb5f0358eb6b524671c16e3f0403d67acb",
+      "equal": true,
+      "source_sha256": "81868c442520827f584c20950bbdac1622a1390fda357c91753d5d4b64ffa1ad"
+    },
+    {
+      "module": "lse_terminal.indicators.alligator",
+      "source": "indicators\\alligator.py",
+      "bundled": true,
+      "installed_code": "fc360d9c3182380280aa207e5b2222c5d4b36cd10eaac2ac9f3ae23b089cd946",
+      "source_code": "fc360d9c3182380280aa207e5b2222c5d4b36cd10eaac2ac9f3ae23b089cd946",
+      "equal": true,
+      "source_sha256": "0f690a73413f7b3b1dbb3b2e1af94c29637edbf3aba0830702533b842ed5ca0e"
+    },
+    {
+      "module": "lse_terminal.indicators.alma",
+      "source": "indicators\\alma.py",
+      "bundled": true,
+      "installed_code": "27094bbd9a15dfe3775ae8da844453a6b13d3ceee030584ec60ff77cba14850f",
+      "source_code": "27094bbd9a15dfe3775ae8da844453a6b13d3ceee030584ec60ff77cba14850f",
+      "equal": true,
+      "source_sha256": "e8ace975428c254d425ee92d1a925beb3ec828af36bdc35926f804d04bd05441"
+    },
+    {
+      "module": "lse_terminal.indicators.ao",
+      "source": "indicators\\ao.py",
+      "bundled": true,
+      "installed_code": "a388901181698a16ba6fa03457854a110e709005aac3b068743cfb598fdd5985",
+      "source_code": "a388901181698a16ba6fa03457854a110e709005aac3b068743cfb598fdd5985",
+      "equal": true,
+      "source_sha256": "19d7b839839c1deca3df0d48bcaf3ff49502d4e21752788635fb675e098e8cde"
+    },
+    {
+      "module": "lse_terminal.indicators.apo",
+      "source": "indicators\\apo.py",
+      "bundled": true,
+      "installed_code": "f05d1f5599bcc53ced9b8905419e92273ac9db235ceec70833b27044a7d8d379",
+      "source_code": "f05d1f5599bcc53ced9b8905419e92273ac9db235ceec70833b27044a7d8d379",
+      "equal": true,
+      "source_sha256": "670e6bb57e13747d83abf3d3199c3e7c4dd42ab662cf617995e9d0221de33796"
+    },
+    {
+      "module": "lse_terminal.indicators.aroon",
+      "source": "indicators\\aroon.py",
+      "bundled": true,
+      "installed_code": "049c53e575dab8f4539219e315c0a5953249c2ce623c882eb04251f7ab6ac3bd",
+      "source_code": "049c53e575dab8f4539219e315c0a5953249c2ce623c882eb04251f7ab6ac3bd",
+      "equal": true,
+      "source_sha256": "4b6b3f6e8a48870202799fb52514ac7a6ed38ce9d32728441bc72dd6b0429302"
+    },
+    {
+      "module": "lse_terminal.indicators.atr",
+      "source": "indicators\\atr.py",
+      "bundled": true,
+      "installed_code": "8c62d3c56d064dba37d7528919afc0e2d9ad139815e36bb57cfa2327036d0cdf",
+      "source_code": "8c62d3c56d064dba37d7528919afc0e2d9ad139815e36bb57cfa2327036d0cdf",
+      "equal": true,
+      "source_sha256": "1a178e01d0ebc584bec0fc2e88be564c876b812a230c9edb50309eace4b34fd8"
+    },
+    {
+      "module": "lse_terminal.indicators.bb_percent",
+      "source": "indicators\\bb_percent.py",
+      "bundled": true,
+      "installed_code": "754b57c76fa97adc89e27e23362c875dd5a8b22ea2f23118042a8dbca52ec2cf",
+      "source_code": "754b57c76fa97adc89e27e23362c875dd5a8b22ea2f23118042a8dbca52ec2cf",
+      "equal": true,
+      "source_sha256": "6451cd05783f951fee8fa693b578a13f210ae20dc4ffefc941246e35a6617af4"
+    },
+    {
+      "module": "lse_terminal.indicators.bb_width",
+      "source": "indicators\\bb_width.py",
+      "bundled": true,
+      "installed_code": "0933a2d298b7f3cd1ec48847f4a98aaab2eaa0cf8466efd9e962e261cf92a281",
+      "source_code": "0933a2d298b7f3cd1ec48847f4a98aaab2eaa0cf8466efd9e962e261cf92a281",
+      "equal": true,
+      "source_sha256": "45dc24a3bffa7628255e71d02be43c91a47cb40f9ee398a2c5993ca96310b1a4"
+    },
+    {
+      "module": "lse_terminal.indicators.bollinger",
+      "source": "indicators\\bollinger.py",
+      "bundled": true,
+      "installed_code": "076f29bfe90e1dab589d50aa1c3f2e51f7d3de7e2aaf56ae410d64ca6b02a848",
+      "source_code": "076f29bfe90e1dab589d50aa1c3f2e51f7d3de7e2aaf56ae410d64ca6b02a848",
+      "equal": true,
+      "source_sha256": "47f63a7c08ab7ca10ec5d4dd4df249e27695ccfe690a7ff44f58a7e114b413a6"
+    },
+    {
+      "module": "lse_terminal.indicators.bop",
+      "source": "indicators\\bop.py",
+      "bundled": true,
+      "installed_code": "6aaba8e8c31cbccd6fc389939aa68883118364c1b3b2dd4ece7c91b07de2e549",
+      "source_code": "6aaba8e8c31cbccd6fc389939aa68883118364c1b3b2dd4ece7c91b07de2e549",
+      "equal": true,
+      "source_sha256": "de3a1909a2713de6cff4ffe4cb910b65a2339a08f58499636a1012e40e12c6ef"
+    },
+    {
+      "module": "lse_terminal.indicators.camarilla",
+      "source": "indicators\\camarilla.py",
+      "bundled": true,
+      "installed_code": "7334fc7a32a03b133e2dc1d336fc6864fc31ad27897488a66a840837d52a1c2f",
+      "source_code": "7334fc7a32a03b133e2dc1d336fc6864fc31ad27897488a66a840837d52a1c2f",
+      "equal": true,
+      "source_sha256": "942f6c1d2b8cbf151de78a10f9f78012c7b66d502a1605fa9c6aeb7d34c4081d"
+    },
+    {
+      "module": "lse_terminal.indicators.cci",
+      "source": "indicators\\cci.py",
+      "bundled": true,
+      "installed_code": "9fcd35ec29d49bca4d6d2252f0f3f7280daa77894f0244da545c37a7d61bdcd5",
+      "source_code": "9fcd35ec29d49bca4d6d2252f0f3f7280daa77894f0244da545c37a7d61bdcd5",
+      "equal": true,
+      "source_sha256": "7fe580fd0ee6b6d2469129abbb055b16a4508a9aa2a004f5b2c6f320df18eec2"
+    },
+    {
+      "module": "lse_terminal.indicators.chaikin_vol",
+      "source": "indicators\\chaikin_vol.py",
+      "bundled": true,
+      "installed_code": "80c3ff7a1f7a64aba7183a2deec851a64fc96047799f4a27510e414277a7e2dc",
+      "source_code": "80c3ff7a1f7a64aba7183a2deec851a64fc96047799f4a27510e414277a7e2dc",
+      "equal": true,
+      "source_sha256": "f5972b20b76752586c99a0f665e76944086a3ec1d5be0cdff3c891ebde34b3a5"
+    },
+    {
+      "module": "lse_terminal.indicators.chandelier",
+      "source": "indicators\\chandelier.py",
+      "bundled": true,
+      "installed_code": "66ab473dea6117b5c831a2691a6f315885ce36df0c3916bf4dc99e3c9a532722",
+      "source_code": "66ab473dea6117b5c831a2691a6f315885ce36df0c3916bf4dc99e3c9a532722",
+      "equal": true,
+      "source_sha256": "2def3757451f58166df61a3adfb6832b3cc97c88ecfe1cbfadf18e0002612fc9"
+    },
+    {
+      "module": "lse_terminal.indicators.chande_kroll",
+      "source": "indicators\\chande_kroll.py",
+      "bundled": true,
+      "installed_code": "fa073890494ed4b752384717149fa158bc04d39641f67334ac008aeca98d61f5",
+      "source_code": "fa073890494ed4b752384717149fa158bc04d39641f67334ac008aeca98d61f5",
+      "equal": true,
+      "source_sha256": "3bcf60482c9170443abb4a6227cbbab5cc7beabb0e7b4294ca6e4006f237cb20"
+    },
+    {
+      "module": "lse_terminal.indicators.choppiness",
+      "source": "indicators\\choppiness.py",
+      "bundled": true,
+      "installed_code": "24351aaed63f488a49bf51e3699dd165441cb007071768686916dc228c6c18a1",
+      "source_code": "24351aaed63f488a49bf51e3699dd165441cb007071768686916dc228c6c18a1",
+      "equal": true,
+      "source_sha256": "7f449f876af121d04c600071a8bd8bdf7219344f12d65e1cfc3051343df8c8ad"
+    },
+    {
+      "module": "lse_terminal.indicators.cmf",
+      "source": "indicators\\cmf.py",
+      "bundled": true,
+      "installed_code": "f2577ea6a67e3854dcaf3e36e5c351971f6927b8afc156fd8d6a31452a41898d",
+      "source_code": "f2577ea6a67e3854dcaf3e36e5c351971f6927b8afc156fd8d6a31452a41898d",
+      "equal": true,
+      "source_sha256": "88fa28a3fc5a6ab3bccb3a28f9b44e601cf515699134b53bb9c27cd0ea4068b0"
+    },
+    {
+      "module": "lse_terminal.indicators.cmo",
+      "source": "indicators\\cmo.py",
+      "bundled": true,
+      "installed_code": "a30d2a87a3cf447b42f3b6a715dbeddf8af4572e74461276b68b0d9311fe3b4a",
+      "source_code": "a30d2a87a3cf447b42f3b6a715dbeddf8af4572e74461276b68b0d9311fe3b4a",
+      "equal": true,
+      "source_sha256": "ba8a00f553c1a48e31f37a6f7b67124be86fd66de8fafea6a2232b4fa997389f"
+    },
+    {
+      "module": "lse_terminal.indicators.connors_rsi",
+      "source": "indicators\\connors_rsi.py",
+      "bundled": true,
+      "installed_code": "650b32adc42ca39d14a6904c4507044ae5eaddbf8ea243805e743f164296fd01",
+      "source_code": "650b32adc42ca39d14a6904c4507044ae5eaddbf8ea243805e743f164296fd01",
+      "equal": true,
+      "source_sha256": "90e8e64635428963a46e5f6f2e79583d56e3d99bad2dcc19176f472922fd42db"
+    },
+    {
+      "module": "lse_terminal.indicators.coppock",
+      "source": "indicators\\coppock.py",
+      "bundled": true,
+      "installed_code": "7537f39e9224342e07568b1d5a372b5556ce0ce04b6a4e46af9428342feaf935",
+      "source_code": "7537f39e9224342e07568b1d5a372b5556ce0ce04b6a4e46af9428342feaf935",
+      "equal": true,
+      "source_sha256": "0661ee19b07be37f0bb209af251b220c4d70114c8ed2ec5ac98c81333c7abdb4"
+    },
+    {
+      "module": "lse_terminal.indicators.dema",
+      "source": "indicators\\dema.py",
+      "bundled": true,
+      "installed_code": "8532c0f5239f0d9741171e27b504e01cb39499e8dbe136eff8a672a5294cba49",
+      "source_code": "8532c0f5239f0d9741171e27b504e01cb39499e8dbe136eff8a672a5294cba49",
+      "equal": true,
+      "source_sha256": "73e961b365b6436ef159be54e0eeda04094e4973245f40d4f8f842d0202092ee"
+    },
+    {
+      "module": "lse_terminal.indicators.demark",
+      "source": "indicators\\demark.py",
+      "bundled": true,
+      "installed_code": "4ab5fe3b843e3e3f4394f56cf2964524282419294b82c8e5b1af7bb52beb12a0",
+      "source_code": "4ab5fe3b843e3e3f4394f56cf2964524282419294b82c8e5b1af7bb52beb12a0",
+      "equal": true,
+      "source_sha256": "a3a8ba87c3928f7f854ea682ade1f6d0423a7a3ab0ed273969a207f1b89a8d9d"
+    },
+    {
+      "module": "lse_terminal.indicators.donchian",
+      "source": "indicators\\donchian.py",
+      "bundled": true,
+      "installed_code": "2f109f33bb68ef3c02b22ddad3aa8d63e16bb3c4fcff673bff04d9144cae06af",
+      "source_code": "2f109f33bb68ef3c02b22ddad3aa8d63e16bb3c4fcff673bff04d9144cae06af",
+      "equal": true,
+      "source_sha256": "6033a1fd0dd92f6476af06026fe997718b6de55fe8d51887b43febc49f671962"
+    },
+    {
+      "module": "lse_terminal.indicators.dpo",
+      "source": "indicators\\dpo.py",
+      "bundled": true,
+      "installed_code": "ff30c45f64c6555e66f96062f7ab1855eabd65652f8fcc2fded4ca1c68c6f5ae",
+      "source_code": "ff30c45f64c6555e66f96062f7ab1855eabd65652f8fcc2fded4ca1c68c6f5ae",
+      "equal": true,
+      "source_sha256": "f2ce5250486b2949a4cd562f2f909ec36f8e6b5d07079378163d75e62f51fe77"
+    },
+    {
+      "module": "lse_terminal.indicators.elder_ray",
+      "source": "indicators\\elder_ray.py",
+      "bundled": true,
+      "installed_code": "5e59bd77a8ab52b3ad6d7de832a990cbf0c474edc35f7a4b063e252820cc62c2",
+      "source_code": "5e59bd77a8ab52b3ad6d7de832a990cbf0c474edc35f7a4b063e252820cc62c2",
+      "equal": true,
+      "source_sha256": "7c02d25ad07f275c3fd6fb54d1e14b38b8b648de69e3c7b6ce6c65979868e6b6"
+    },
+    {
+      "module": "lse_terminal.indicators.ema",
+      "source": "indicators\\ema.py",
+      "bundled": true,
+      "installed_code": "2e0ab4fe1d582869812f48c409c063ccf91d20c7dda6580f527512ffc116c62c",
+      "source_code": "2e0ab4fe1d582869812f48c409c063ccf91d20c7dda6580f527512ffc116c62c",
+      "equal": true,
+      "source_sha256": "eaf07abf39bc3b62f532eb2e22713ffd6158156bef85b7ec9ec9abbd329bb68c"
+    },
+    {
+      "module": "lse_terminal.indicators.envelopes",
+      "source": "indicators\\envelopes.py",
+      "bundled": true,
+      "installed_code": "44e27a65c6c588af82298bd2f3a64be358ea80465c409b4551c95df0a136f829",
+      "source_code": "44e27a65c6c588af82298bd2f3a64be358ea80465c409b4551c95df0a136f829",
+      "equal": true,
+      "source_sha256": "fd3e9579b24dde33af5d216dd0f9aa87a5160e87f3db52b67ed934e20cca0698"
+    },
+    {
+      "module": "lse_terminal.indicators.eom",
+      "source": "indicators\\eom.py",
+      "bundled": true,
+      "installed_code": "b0e93d85c6d86b4921b35fdd7dffb4735f79f2b3253a85f46982d7ca151efbbe",
+      "source_code": "b0e93d85c6d86b4921b35fdd7dffb4735f79f2b3253a85f46982d7ca151efbbe",
+      "equal": true,
+      "source_sha256": "92d23873387172745199bc524457c1b4f7973d1bb570af695a1d8854ca839400"
+    },
+    {
+      "module": "lse_terminal.indicators.fib_retracement",
+      "source": "indicators\\fib_retracement.py",
+      "bundled": true,
+      "installed_code": "293523c1a4094f9a30e1df5cf25e14db99f610f996f5d2476708731af7df582d",
+      "source_code": "293523c1a4094f9a30e1df5cf25e14db99f610f996f5d2476708731af7df582d",
+      "equal": true,
+      "source_sha256": "a91253b475cc92b00b7d847fc614022897f0ec951915afffb56a173c8e9247de"
+    },
+    {
+      "module": "lse_terminal.indicators.fisher",
+      "source": "indicators\\fisher.py",
+      "bundled": true,
+      "installed_code": "30badc31bc0a460d819691fdf138a7a0377652fcc93b9af4b4a1fe15d5ca6af5",
+      "source_code": "30badc31bc0a460d819691fdf138a7a0377652fcc93b9af4b4a1fe15d5ca6af5",
+      "equal": true,
+      "source_sha256": "f6839d87699d60479f4aa0c0ecee1907318927b49287334729ba44000a9fafde"
+    },
+    {
+      "module": "lse_terminal.indicators.force_index",
+      "source": "indicators\\force_index.py",
+      "bundled": true,
+      "installed_code": "f821667da9b8dd9d5f7e77cd021ed9dbefbbdfcef8542596dc23656d9e4741a2",
+      "source_code": "f821667da9b8dd9d5f7e77cd021ed9dbefbbdfcef8542596dc23656d9e4741a2",
+      "equal": true,
+      "source_sha256": "9817c531edc977d1c1047fc35b5b41fd2402c2c88f53ca74be50f522d71a13b2"
+    },
+    {
+      "module": "lse_terminal.indicators.fractals",
+      "source": "indicators\\fractals.py",
+      "bundled": true,
+      "installed_code": "c2cb0a7f96e2ce8bf6532e2c8dbdb230e9b82c2d04f58fafc344733eb201c0c7",
+      "source_code": "c2cb0a7f96e2ce8bf6532e2c8dbdb230e9b82c2d04f58fafc344733eb201c0c7",
+      "equal": true,
+      "source_sha256": "9ff18ab2447dd7b7a77c7d9e134aaf7b7d354a68d54f550683ad687cca33b0bb"
+    },
+    {
+      "module": "lse_terminal.indicators.gator",
+      "source": "indicators\\gator.py",
+      "bundled": true,
+      "installed_code": "ca664813368544c8851c30d523731743118ffd867e638a44e9efc8cce035a7ba",
+      "source_code": "ca664813368544c8851c30d523731743118ffd867e638a44e9efc8cce035a7ba",
+      "equal": true,
+      "source_sha256": "afc069647e62a87ed84bbf8960ae22c39f7f833bba0de5fbaaa0b3be7bf4d74e"
+    },
+    {
+      "module": "lse_terminal.indicators.hist_vol",
+      "source": "indicators\\hist_vol.py",
+      "bundled": true,
+      "installed_code": "38d020d2b3816d58b3155d38d06555580d7fce10d16ad351860fec8acd26acd7",
+      "source_code": "38d020d2b3816d58b3155d38d06555580d7fce10d16ad351860fec8acd26acd7",
+      "equal": true,
+      "source_sha256": "a349053240ad58ff9aaa1e7d16c370bed023aff82c898f7042eca1dc6f5e69bb"
+    },
+    {
+      "module": "lse_terminal.indicators.hma",
+      "source": "indicators\\hma.py",
+      "bundled": true,
+      "installed_code": "6f34cb0d61200a1f83503eae1fea8a41c574339e995a539cf85d487fac3742ee",
+      "source_code": "6f34cb0d61200a1f83503eae1fea8a41c574339e995a539cf85d487fac3742ee",
+      "equal": true,
+      "source_sha256": "8f204271eb9e95c827fd2a46fb10bb41f105d5893810dd7f046f567e1ca79855"
+    },
+    {
+      "module": "lse_terminal.indicators.ichimoku",
+      "source": "indicators\\ichimoku.py",
+      "bundled": true,
+      "installed_code": "286e2c664eb62d7ace8623cb3f80434858f093ce8d75c611c1dc5ad68068fe67",
+      "source_code": "286e2c664eb62d7ace8623cb3f80434858f093ce8d75c611c1dc5ad68068fe67",
+      "equal": true,
+      "source_sha256": "92b3ff845dd9b72ce3681700499eb268348b6830a56c0af4d51aba1f5dde0f31"
+    },
+    {
+      "module": "lse_terminal.indicators.kama",
+      "source": "indicators\\kama.py",
+      "bundled": true,
+      "installed_code": "8c1a828524697531c83b26cdd364bf6b3a60126ed2f1e6d5026dad5d3be0f985",
+      "source_code": "8c1a828524697531c83b26cdd364bf6b3a60126ed2f1e6d5026dad5d3be0f985",
+      "equal": true,
+      "source_sha256": "51a727c324bac5d75dfa3b46cdcd54d80fe9a5c4ab59864ffb625bb5ecc444bc"
+    },
+    {
+      "module": "lse_terminal.indicators.keltner",
+      "source": "indicators\\keltner.py",
+      "bundled": true,
+      "installed_code": "6c0124e2dba4aeabfe684cfda47cb8874908aed3afc170fe183555a433bc82bc",
+      "source_code": "6c0124e2dba4aeabfe684cfda47cb8874908aed3afc170fe183555a433bc82bc",
+      "equal": true,
+      "source_sha256": "201d9126d1837e17059e7b2d7b79fc2a3aa4d4209dd8d48a5f990a2793b40bb9"
+    },
+    {
+      "module": "lse_terminal.indicators.klinger",
+      "source": "indicators\\klinger.py",
+      "bundled": true,
+      "installed_code": "dd78c33367ea9354863cfeceadd989b79731002114ea522a59832fafd59339b5",
+      "source_code": "dd78c33367ea9354863cfeceadd989b79731002114ea522a59832fafd59339b5",
+      "equal": true,
+      "source_sha256": "73fe2a51c1dbf99f80b1b0b06f73961807d4407da6ebf0a77866f8339a8afede"
+    },
+    {
+      "module": "lse_terminal.indicators.kst",
+      "source": "indicators\\kst.py",
+      "bundled": true,
+      "installed_code": "7dc9d6a53b4555fab543ceacc05a5249d25aba5d2143dee4aa01b1832e4ae351",
+      "source_code": "7dc9d6a53b4555fab543ceacc05a5249d25aba5d2143dee4aa01b1832e4ae351",
+      "equal": true,
+      "source_sha256": "dbc6f88ab1e6723ba05e9e12b34a4077430b8c1904592b1fd20f01cb8ba5c929"
+    },
+    {
+      "module": "lse_terminal.indicators.lin_reg",
+      "source": "indicators\\lin_reg.py",
+      "bundled": true,
+      "installed_code": "ffbe3a811b3e950ec4056c86dfefd8134af8d89d0000533f1eb0571647c2d789",
+      "source_code": "ffbe3a811b3e950ec4056c86dfefd8134af8d89d0000533f1eb0571647c2d789",
+      "equal": true,
+      "source_sha256": "2b200e796edcf28300041dbed6a2e0b784517c3df1606242b46579f22f8e99b6"
+    },
+    {
+      "module": "lse_terminal.indicators.lr_slope",
+      "source": "indicators\\lr_slope.py",
+      "bundled": true,
+      "installed_code": "fa2405142ddacc6fa958633e50d0cb043e4cf985bea9d71ee31d8b632014fc73",
+      "source_code": "fa2405142ddacc6fa958633e50d0cb043e4cf985bea9d71ee31d8b632014fc73",
+      "equal": true,
+      "source_sha256": "749cc87dc3dfedc535df12d7311de8625c42cd4d458f5bcd07d97de70fc04c0b"
+    },
+    {
+      "module": "lse_terminal.indicators.lsma",
+      "source": "indicators\\lsma.py",
+      "bundled": true,
+      "installed_code": "152078ef1a367d95bdf43c0f6c56a5e2fb8478daea5463b4ab86e0427665d87b",
+      "source_code": "152078ef1a367d95bdf43c0f6c56a5e2fb8478daea5463b4ab86e0427665d87b",
+      "equal": true,
+      "source_sha256": "0bd94435e7808418217d5918014aa9cef504c7343da4203a87ccdd76ea5c0270"
+    },
+    {
+      "module": "lse_terminal.indicators.macd",
+      "source": "indicators\\macd.py",
+      "bundled": true,
+      "installed_code": "c659aeef0518c018226651a20084ac74c50549c71433361390bde2c1e9545576",
+      "source_code": "c659aeef0518c018226651a20084ac74c50549c71433361390bde2c1e9545576",
+      "equal": true,
+      "source_sha256": "ad43e5de815a419482ec06d2f7da5fa0c2e3e75bf216e6e35e1a248a4ceff42f"
+    },
+    {
+      "module": "lse_terminal.indicators.mass_index",
+      "source": "indicators\\mass_index.py",
+      "bundled": true,
+      "installed_code": "585a166e6a8bdf58f3adb4effbf63034759c4ef6babe9a328fc5ce516c810593",
+      "source_code": "585a166e6a8bdf58f3adb4effbf63034759c4ef6babe9a328fc5ce516c810593",
+      "equal": true,
+      "source_sha256": "f915547433daf761245c4936e9622fce7ea09ef54bb696287c031ccb077c2b4a"
+    },
+    {
+      "module": "lse_terminal.indicators.mcginley",
+      "source": "indicators\\mcginley.py",
+      "bundled": true,
+      "installed_code": "76ec113d765f2c54d0dc5e304c7e6054e6a55d976394b704f33f1803afd55bdf",
+      "source_code": "76ec113d765f2c54d0dc5e304c7e6054e6a55d976394b704f33f1803afd55bdf",
+      "equal": true,
+      "source_sha256": "df93895524a4cc74b45926c7ab0c3c0beed5b8a320b4e53224b1eb7743747397"
+    },
+    {
+      "module": "lse_terminal.indicators.median_price",
+      "source": "indicators\\median_price.py",
+      "bundled": true,
+      "installed_code": "191c1f8d4d2b8b99b73dd96aef60127a7cd055a1e7cd6f4a31e2454eb213db3b",
+      "source_code": "191c1f8d4d2b8b99b73dd96aef60127a7cd055a1e7cd6f4a31e2454eb213db3b",
+      "equal": true,
+      "source_sha256": "7b7f9de570c3713e8cff116f11e8dfd47b359093706996d1f834dba1d1450369"
+    },
+    {
+      "module": "lse_terminal.indicators.mfi",
+      "source": "indicators\\mfi.py",
+      "bundled": true,
+      "installed_code": "777e84d760a27b03281e14fb86693217eb984b155cdf402216b5f820aa0321cc",
+      "source_code": "777e84d760a27b03281e14fb86693217eb984b155cdf402216b5f820aa0321cc",
+      "equal": true,
+      "source_sha256": "59fc51e7d50d8c1907b409fae09f2baec94f499e3f440500225aa02ddb3b49fd"
+    },
+    {
+      "module": "lse_terminal.indicators.momentum",
+      "source": "indicators\\momentum.py",
+      "bundled": true,
+      "installed_code": "4ca4cdac2019c22c7d0c07c8692c1f9900a524f186cf03d3a8b24592e0616661",
+      "source_code": "4ca4cdac2019c22c7d0c07c8692c1f9900a524f186cf03d3a8b24592e0616661",
+      "equal": true,
+      "source_sha256": "a88522ba67d17ea07f6c08e5d3f96aec519de501fa7fc2239b7b98c3738c94c9"
+    },
+    {
+      "module": "lse_terminal.indicators.natr",
+      "source": "indicators\\natr.py",
+      "bundled": true,
+      "installed_code": "b2d7a5e6c98113ccb2a48c2647d39c4bc576a353acc8c0a59e63c1587418c64a",
+      "source_code": "b2d7a5e6c98113ccb2a48c2647d39c4bc576a353acc8c0a59e63c1587418c64a",
+      "equal": true,
+      "source_sha256": "db5f21f364a136ae0b42bee5550910e9f7363b328a1af5deef15b83f1a2a7422"
+    },
+    {
+      "module": "lse_terminal.indicators.net_volume",
+      "source": "indicators\\net_volume.py",
+      "bundled": true,
+      "installed_code": "da40a8ef7604a2fdcac700f7324afc4f493b000582ec50aa1e6c95ebda994e97",
+      "source_code": "da40a8ef7604a2fdcac700f7324afc4f493b000582ec50aa1e6c95ebda994e97",
+      "equal": true,
+      "source_sha256": "f77052e081e8c9919c7bf17a68feb24326f7a5f53899624e3c4c00adfdd61c3d"
+    },
+    {
+      "module": "lse_terminal.indicators.nvi",
+      "source": "indicators\\nvi.py",
+      "bundled": true,
+      "installed_code": "1899e86f52a2963f869800ec9709e73271b81562e40894dfcd5c8f4be0d266d8",
+      "source_code": "1899e86f52a2963f869800ec9709e73271b81562e40894dfcd5c8f4be0d266d8",
+      "equal": true,
+      "source_sha256": "0d5ea14617ed41964179f04ff6d3f1ad53ed3bb0707fcf63a8aece16a20e66f6"
+    },
+    {
+      "module": "lse_terminal.indicators.obv",
+      "source": "indicators\\obv.py",
+      "bundled": true,
+      "installed_code": "96832e3f8c66f1a8f530a57a0930bce6303fd71cdc7519e28abac03186798000",
+      "source_code": "96832e3f8c66f1a8f530a57a0930bce6303fd71cdc7519e28abac03186798000",
+      "equal": true,
+      "source_sha256": "9aa40e2f38041d55aaa121b93e6b87036e865d9abebebde06232893819c25866"
+    },
+    {
+      "module": "lse_terminal.indicators.pfe",
+      "source": "indicators\\pfe.py",
+      "bundled": true,
+      "installed_code": "e26e407c3f083b9f9cca73c18d138ee85d7bc9201b2341b26677ce4124d85a0c",
+      "source_code": "e26e407c3f083b9f9cca73c18d138ee85d7bc9201b2341b26677ce4124d85a0c",
+      "equal": true,
+      "source_sha256": "8e1fe2bf847abc769fc43242800800bc3d37428ee7a6a8e23c7aa5879ccba6c5"
+    },
+    {
+      "module": "lse_terminal.indicators.pivots",
+      "source": "indicators\\pivots.py",
+      "bundled": true,
+      "installed_code": "3f02700116cdade5ec4f4d8e32e72e3ba48f966e7dcba5f32d33a8b24a46acf7",
+      "source_code": "3f02700116cdade5ec4f4d8e32e72e3ba48f966e7dcba5f32d33a8b24a46acf7",
+      "equal": true,
+      "source_sha256": "58bb533be7c8a2dae7d01df0b77736e0d1d35ba399f3a83e586430be382ade23"
+    },
+    {
+      "module": "lse_terminal.indicators.ppo",
+      "source": "indicators\\ppo.py",
+      "bundled": true,
+      "installed_code": "3c8bdc335c336fc12a534a109c057a8c9534b575122d60a2b5192a20adeb33fc",
+      "source_code": "3c8bdc335c336fc12a534a109c057a8c9534b575122d60a2b5192a20adeb33fc",
+      "equal": true,
+      "source_sha256": "99349c632c3d7cc35828c971a5c8145831f45ebbe80515fdce855659a5387f36"
+    },
+    {
+      "module": "lse_terminal.indicators.price_channel",
+      "source": "indicators\\price_channel.py",
+      "bundled": true,
+      "installed_code": "52f774cadba2fafab33cb0a4a4924a6564e2aba115488046b629f882dd2cdbd7",
+      "source_code": "52f774cadba2fafab33cb0a4a4924a6564e2aba115488046b629f882dd2cdbd7",
+      "equal": true,
+      "source_sha256": "5ff5577b075e66abf32e06300351de1cfe957ae9b722d212651fdba702560a0f"
+    },
+    {
+      "module": "lse_terminal.indicators.psar",
+      "source": "indicators\\psar.py",
+      "bundled": true,
+      "installed_code": "8d681c1e9932e346e6afb3c92c6a378f379904a877727119efe8a495ed7f6399",
+      "source_code": "8d681c1e9932e346e6afb3c92c6a378f379904a877727119efe8a495ed7f6399",
+      "equal": true,
+      "source_sha256": "1c8a7f1ebd5b00f941c38cbcc93883be19d619602d37b87c70e380254b5afb22"
+    },
+    {
+      "module": "lse_terminal.indicators.psych_line",
+      "source": "indicators\\psych_line.py",
+      "bundled": true,
+      "installed_code": "3ad1d49b269de1dbbe682e234771960cc75e5ec4aaf164525c6d295ea021a4a0",
+      "source_code": "3ad1d49b269de1dbbe682e234771960cc75e5ec4aaf164525c6d295ea021a4a0",
+      "equal": true,
+      "source_sha256": "32fa387b244f1226bc3f48b2f23c74a49cce4c11bf02c81a97439898d3125ebd"
+    },
+    {
+      "module": "lse_terminal.indicators.pvi",
+      "source": "indicators\\pvi.py",
+      "bundled": true,
+      "installed_code": "cab333b2fa4d516f9bef047767d58899400444c82653f79aafadcd887c85cb6f",
+      "source_code": "cab333b2fa4d516f9bef047767d58899400444c82653f79aafadcd887c85cb6f",
+      "equal": true,
+      "source_sha256": "9e966e1096717f9e018c260eedde37bc1e849f21caa2a8e8768c09f9dda9a19b"
+    },
+    {
+      "module": "lse_terminal.indicators.pvo",
+      "source": "indicators\\pvo.py",
+      "bundled": true,
+      "installed_code": "c483e16947f251bdf2d7d258e44bd2001124456db90f88ad8884c156d8133657",
+      "source_code": "c483e16947f251bdf2d7d258e44bd2001124456db90f88ad8884c156d8133657",
+      "equal": true,
+      "source_sha256": "b314d8eb7b3ab08de352c30cea09589c7fd2f0c81ef70bdd6597de58948f92f0"
+    },
+    {
+      "module": "lse_terminal.indicators.pvt",
+      "source": "indicators\\pvt.py",
+      "bundled": true,
+      "installed_code": "30d6025901de424de137fcad53f94dd15ee6541ccc5b6d06f6638b7c3fa2abdc",
+      "source_code": "30d6025901de424de137fcad53f94dd15ee6541ccc5b6d06f6638b7c3fa2abdc",
+      "equal": true,
+      "source_sha256": "fca2bb24333613bf2d857e901080ffbfa42d43cf3203c01b0dbc876d59f1ec95"
+    },
+    {
+      "module": "lse_terminal.indicators.qstick",
+      "source": "indicators\\qstick.py",
+      "bundled": true,
+      "installed_code": "d9b14481eb9f9084e05bcf344ee135d28f4ba44a24ca4edcbdc1f42fe020643b",
+      "source_code": "d9b14481eb9f9084e05bcf344ee135d28f4ba44a24ca4edcbdc1f42fe020643b",
+      "equal": true,
+      "source_sha256": "40c5384a7460bb9c512255bed18de3a0979658ed85c1d8a2184a3d3b5871b8e0"
+    },
+    {
+      "module": "lse_terminal.indicators.roc",
+      "source": "indicators\\roc.py",
+      "bundled": true,
+      "installed_code": "98536f53e1ac76dfaf83e97c0734811423deb269ebd7b9e3a01d911dc2d2c5b4",
+      "source_code": "98536f53e1ac76dfaf83e97c0734811423deb269ebd7b9e3a01d911dc2d2c5b4",
+      "equal": true,
+      "source_sha256": "78e050323a4d059e492e69d7559293409531451d29559640e87935e95417af5a"
+    },
+    {
+      "module": "lse_terminal.indicators.rsi",
+      "source": "indicators\\rsi.py",
+      "bundled": true,
+      "installed_code": "381574fc77af4bd3c86348a40fe3eb78a8ff1e41c73143f14119e6e624c176b4",
+      "source_code": "381574fc77af4bd3c86348a40fe3eb78a8ff1e41c73143f14119e6e624c176b4",
+      "equal": true,
+      "source_sha256": "6f3946d2e7a3f4999f6f1a7f54f4aed36e911b626067cf888da35b8937a38721"
+    },
+    {
+      "module": "lse_terminal.indicators.rvi",
+      "source": "indicators\\rvi.py",
+      "bundled": true,
+      "installed_code": "ad5b28c43b7c09bf95936ae7728593d1c53618f65e3ce41e40fe3a7eacfa1fad",
+      "source_code": "ad5b28c43b7c09bf95936ae7728593d1c53618f65e3ce41e40fe3a7eacfa1fad",
+      "equal": true,
+      "source_sha256": "dda8b1df0569a448054e5c247cb1a2199018dde56660b7f40f18be401958e183"
+    },
+    {
+      "module": "lse_terminal.indicators.rvol",
+      "source": "indicators\\rvol.py",
+      "bundled": true,
+      "installed_code": "de65438e0bb45d4aaee9d9291111f144fb440548d0153819ba1286c9cb658cc0",
+      "source_code": "de65438e0bb45d4aaee9d9291111f144fb440548d0153819ba1286c9cb658cc0",
+      "equal": true,
+      "source_sha256": "e3a7407acb6f45d78d1160ab1f1ad272a89f8c2adba35c43cd9b093995e05cd4"
+    },
+    {
+      "module": "lse_terminal.indicators.r_squared",
+      "source": "indicators\\r_squared.py",
+      "bundled": true,
+      "installed_code": "b325426400629fc7dcc8be7a1067a6cd5dc992d4a418227b725107687a4e6564",
+      "source_code": "b325426400629fc7dcc8be7a1067a6cd5dc992d4a418227b725107687a4e6564",
+      "equal": true,
+      "source_sha256": "739cf706497d5a17b34adf587c1c1bf9f1d352bdd3990f24030b561980882977"
+    },
+    {
+      "module": "lse_terminal.indicators.sma",
+      "source": "indicators\\sma.py",
+      "bundled": true,
+      "installed_code": "b92a75a7eb0ddd645b91067e5feaf6a8ea3dd89c35bca1dd9b922ef09da1a779",
+      "source_code": "b92a75a7eb0ddd645b91067e5feaf6a8ea3dd89c35bca1dd9b922ef09da1a779",
+      "equal": true,
+      "source_sha256": "e62d99c5c4e7022ba8a8123a4e1a08671738322cf9cb4de9740b9feff1506630"
+    },
+    {
+      "module": "lse_terminal.indicators.smi",
+      "source": "indicators\\smi.py",
+      "bundled": true,
+      "installed_code": "728eab1e0b63d61accd901d2e0a52d836a93661fda964c8f5ff7d62ae7d26070",
+      "source_code": "728eab1e0b63d61accd901d2e0a52d836a93661fda964c8f5ff7d62ae7d26070",
+      "equal": true,
+      "source_sha256": "c1a2395295079932132907e78b9cbca743fb0440ae98532131e9893ab0ffb6b7"
+    },
+    {
+      "module": "lse_terminal.indicators.smma",
+      "source": "indicators\\smma.py",
+      "bundled": true,
+      "installed_code": "191ce6eae02eb3222edf4fedffcad5c85d4a0f338185342a6e1fb8f71cc24f0e",
+      "source_code": "191ce6eae02eb3222edf4fedffcad5c85d4a0f338185342a6e1fb8f71cc24f0e",
+      "equal": true,
+      "source_sha256": "eaa05371fe841092e377ebd4d9e78ab7f8b1d4d8285b1f5c3ecd19044e49a4b0"
+    },
+    {
+      "module": "lse_terminal.indicators.squeeze",
+      "source": "indicators\\squeeze.py",
+      "bundled": true,
+      "installed_code": "eb84fd762558172bbaef93a34fd96206e11f86fc4a8ada1bc6e6431434c19425",
+      "source_code": "eb84fd762558172bbaef93a34fd96206e11f86fc4a8ada1bc6e6431434c19425",
+      "equal": true,
+      "source_sha256": "36f8c25a4ac68376b007e8d823876be30ab9be1512ea0cc9b3db5719087781be"
+    },
+    {
+      "module": "lse_terminal.indicators.stc",
+      "source": "indicators\\stc.py",
+      "bundled": true,
+      "installed_code": "b91dbf078a693b8a0701d9fd1eb9d690c88db093db584512857e2c7ad1392127",
+      "source_code": "b91dbf078a693b8a0701d9fd1eb9d690c88db093db584512857e2c7ad1392127",
+      "equal": true,
+      "source_sha256": "9006861c315635173a38cbbeaf027f4a8d40708fa6c769dae43acd4d44e77314"
+    },
+    {
+      "module": "lse_terminal.indicators.stddev",
+      "source": "indicators\\stddev.py",
+      "bundled": true,
+      "installed_code": "277bcb6ffb27902d1d0bec6ce3d1c8c33438b14e585317b2da4bc14ffe552bac",
+      "source_code": "277bcb6ffb27902d1d0bec6ce3d1c8c33438b14e585317b2da4bc14ffe552bac",
+      "equal": true,
+      "source_sha256": "58a5911ea5cdcd9f9d838019df25fcabbcce76113437a2e2fdbc7820d8bd212b"
+    },
+    {
+      "module": "lse_terminal.indicators.stochastic",
+      "source": "indicators\\stochastic.py",
+      "bundled": true,
+      "installed_code": "215def099bc35321abb54a2c44b1b88204149dd3a30bb954973e47fc4b3f7d80",
+      "source_code": "215def099bc35321abb54a2c44b1b88204149dd3a30bb954973e47fc4b3f7d80",
+      "equal": true,
+      "source_sha256": "daa78da672c80903a9eefbd7cc7a7059675536a48c08639186ddf2e601049e78"
+    },
+    {
+      "module": "lse_terminal.indicators.stoch_rsi",
+      "source": "indicators\\stoch_rsi.py",
+      "bundled": true,
+      "installed_code": "08a42db439d4f5ef3be9f81e65df2663bd141b5d1c7eff222af27b4ce89e031a",
+      "source_code": "08a42db439d4f5ef3be9f81e65df2663bd141b5d1c7eff222af27b4ce89e031a",
+      "equal": true,
+      "source_sha256": "ecc7da1b8606d369323c1ab64bf23b79c7c505d9d2c84382bbade5ac6eac0cb2"
+    },
+    {
+      "module": "lse_terminal.indicators.supertrend",
+      "source": "indicators\\supertrend.py",
+      "bundled": true,
+      "installed_code": "9082840f607b51d8732d0b519d8cd8efcf79e2a2cf3d38e8b7e97a7d9fb16c31",
+      "source_code": "9082840f607b51d8732d0b519d8cd8efcf79e2a2cf3d38e8b7e97a7d9fb16c31",
+      "equal": true,
+      "source_sha256": "a2677f6d81b573854ec55e1b10abb7233ecc0b041003a060cad7300cc15a0438"
+    },
+    {
+      "module": "lse_terminal.indicators.t3",
+      "source": "indicators\\t3.py",
+      "bundled": true,
+      "installed_code": "38a21c9e378554699812e0b3eb4c70c4b7f5e5c8dec9244a7667667309680f86",
+      "source_code": "38a21c9e378554699812e0b3eb4c70c4b7f5e5c8dec9244a7667667309680f86",
+      "equal": true,
+      "source_sha256": "30c2bad92027acb7b963c568203dd5ffc5d1d5035d7e4db8874f95dcf569bd73"
+    },
+    {
+      "module": "lse_terminal.indicators.tema",
+      "source": "indicators\\tema.py",
+      "bundled": true,
+      "installed_code": "5f2f7767db6b884e31f22abe9a6523ef3aeffeb996423395612aedd6691104f7",
+      "source_code": "5f2f7767db6b884e31f22abe9a6523ef3aeffeb996423395612aedd6691104f7",
+      "equal": true,
+      "source_sha256": "fb38e5174d0e37b0207a3dd43d74936550696b1cc98a4dd2ac8327930ad7d2a2"
+    },
+    {
+      "module": "lse_terminal.indicators.trix",
+      "source": "indicators\\trix.py",
+      "bundled": true,
+      "installed_code": "66ce40a19e1199dc6f01f3ba210e8b2840db4e3f7da2e5a5ce3ea3f470987e5d",
+      "source_code": "66ce40a19e1199dc6f01f3ba210e8b2840db4e3f7da2e5a5ce3ea3f470987e5d",
+      "equal": true,
+      "source_sha256": "cdaee02419aacdb921db487f9641333c53024c6639622880a9538ac7f53934f5"
+    },
+    {
+      "module": "lse_terminal.indicators.true_range",
+      "source": "indicators\\true_range.py",
+      "bundled": true,
+      "installed_code": "a79b73a44634e0d20a5f655e126a8a1bb53e39e0dcf9822d692254d0422e45a0",
+      "source_code": "a79b73a44634e0d20a5f655e126a8a1bb53e39e0dcf9822d692254d0422e45a0",
+      "equal": true,
+      "source_sha256": "33deec73dde8d6ce45f6c6608ada86939b0655ad539834cbab1f8cc6f130f690"
+    },
+    {
+      "module": "lse_terminal.indicators.tsi",
+      "source": "indicators\\tsi.py",
+      "bundled": true,
+      "installed_code": "248f32d03463264752e8b8e710d92c2cdd8423f1fb91f577dcf1ddeee7e89318",
+      "source_code": "248f32d03463264752e8b8e710d92c2cdd8423f1fb91f577dcf1ddeee7e89318",
+      "equal": true,
+      "source_sha256": "d903e6b476696afeb5715d93ebc524c3b1f2500565f3495e57ede7349241f186"
+    },
+    {
+      "module": "lse_terminal.indicators.twiggs_mf",
+      "source": "indicators\\twiggs_mf.py",
+      "bundled": true,
+      "installed_code": "89b849bbe1e5a6166dc1faf7deb302d34aa2c1278374739d30979422592ca2cb",
+      "source_code": "89b849bbe1e5a6166dc1faf7deb302d34aa2c1278374739d30979422592ca2cb",
+      "equal": true,
+      "source_sha256": "08d9c9d67aa467dfdc3e03952bdf3e32d814661e04cd785e33e6c18f94dd50a7"
+    },
+    {
+      "module": "lse_terminal.indicators.typical_price",
+      "source": "indicators\\typical_price.py",
+      "bundled": true,
+      "installed_code": "36dc0d57401587d3cc5f2a3a9a635c35960506a8b6aaf80b6d7e5100503c29cb",
+      "source_code": "36dc0d57401587d3cc5f2a3a9a635c35960506a8b6aaf80b6d7e5100503c29cb",
+      "equal": true,
+      "source_sha256": "e3e193177e43c145a4f6c2e59a1457ef766dde2a427eea526004f21839ac6953"
+    },
+    {
+      "module": "lse_terminal.indicators.ulcer",
+      "source": "indicators\\ulcer.py",
+      "bundled": true,
+      "installed_code": "7996c1a8c2307c6d8818ca46f6105007292f9f920f887f3f0da3acc5470158d9",
+      "source_code": "7996c1a8c2307c6d8818ca46f6105007292f9f920f887f3f0da3acc5470158d9",
+      "equal": true,
+      "source_sha256": "85c85983d963212a19441f09b9a8f40a8dd05a2bfad76660aea73722e369385f"
+    },
+    {
+      "module": "lse_terminal.indicators.uo",
+      "source": "indicators\\uo.py",
+      "bundled": true,
+      "installed_code": "7fb5471152519f97af13ab74dc11d717aa45defaab9ccdcf2630ff58bb31bfd4",
+      "source_code": "7fb5471152519f97af13ab74dc11d717aa45defaab9ccdcf2630ff58bb31bfd4",
+      "equal": true,
+      "source_sha256": "ebe6c9c9c49c6c40d6a87d9f4baf20ce7bce8b057027d6030e8bf6431dc8ed89"
+    },
+    {
+      "module": "lse_terminal.indicators.vhf",
+      "source": "indicators\\vhf.py",
+      "bundled": true,
+      "installed_code": "a94ee6bf424f068e7058a0505781c94230b54454af7d6ad77beb3f244ca89922",
+      "source_code": "a94ee6bf424f068e7058a0505781c94230b54454af7d6ad77beb3f244ca89922",
+      "equal": true,
+      "source_sha256": "65bf798b7a088f06ca6bf7e4a812c500a83e85deaf703828e268bb4f2709c60a"
+    },
+    {
+      "module": "lse_terminal.indicators.volume",
+      "source": "indicators\\volume.py",
+      "bundled": true,
+      "installed_code": "5be968220c86938563253b480b1b353b859dcec940760f6d601421994132a0ca",
+      "source_code": "5be968220c86938563253b480b1b353b859dcec940760f6d601421994132a0ca",
+      "equal": true,
+      "source_sha256": "cb8b927d1aea5023cfc062cfb6fff8b4bd333af7766934de572e51d603ec4da4"
+    },
+    {
+      "module": "lse_terminal.indicators.volume_osc",
+      "source": "indicators\\volume_osc.py",
+      "bundled": true,
+      "installed_code": "18e8c27974edccf78ebaa8e689c3f6ff8e0b068ebc31b8daf3a762cdd7f30e95",
+      "source_code": "18e8c27974edccf78ebaa8e689c3f6ff8e0b068ebc31b8daf3a762cdd7f30e95",
+      "equal": true,
+      "source_sha256": "e3d49913eb7b87d356ffc47e3cda27e9fdb8805c86cea49e975a59ba79a847e7"
+    },
+    {
+      "module": "lse_terminal.indicators.volume_sma",
+      "source": "indicators\\volume_sma.py",
+      "bundled": true,
+      "installed_code": "38f6b9e35906ec746a1a38cdd497a8eae714c00b9fa82320bff8a99b93d75bb4",
+      "source_code": "38f6b9e35906ec746a1a38cdd497a8eae714c00b9fa82320bff8a99b93d75bb4",
+      "equal": true,
+      "source_sha256": "647fd26d2827d65137cc32e17a0730914facac5bac312d46eaba3a7350c8b79c"
+    },
+    {
+      "module": "lse_terminal.indicators.vortex",
+      "source": "indicators\\vortex.py",
+      "bundled": true,
+      "installed_code": "66d1ce1cb13c26bfc3a7851955f31d27f5003efa57f819e4c88a44517b02dd35",
+      "source_code": "66d1ce1cb13c26bfc3a7851955f31d27f5003efa57f819e4c88a44517b02dd35",
+      "equal": true,
+      "source_sha256": "8861c05898c67565504b21cc2af389e822a1c9ace8eaaa28eaca954453f5f2af"
+    },
+    {
+      "module": "lse_terminal.indicators.vroc",
+      "source": "indicators\\vroc.py",
+      "bundled": true,
+      "installed_code": "a451efd3f263a276617ce6daddf520172e951bbcd7aadbdfd38a912aef562199",
+      "source_code": "a451efd3f263a276617ce6daddf520172e951bbcd7aadbdfd38a912aef562199",
+      "equal": true,
+      "source_sha256": "e59a35a84e45e99fa1ce31014a2f59d502b05c5d334a4a50117f7b569c4f8e72"
+    },
+    {
+      "module": "lse_terminal.indicators.vwap",
+      "source": "indicators\\vwap.py",
+      "bundled": true,
+      "installed_code": "3ab063b25c41ed97b4b596a6ad9f708348c064e6cfddc72b19ddcfbcb1c331c7",
+      "source_code": "3ab063b25c41ed97b4b596a6ad9f708348c064e6cfddc72b19ddcfbcb1c331c7",
+      "equal": true,
+      "source_sha256": "1dcf395249fc021f75f293d1d00caeec7219bce96b6faf14e517333878fec9fa"
+    },
+    {
+      "module": "lse_terminal.indicators.vwma",
+      "source": "indicators\\vwma.py",
+      "bundled": true,
+      "installed_code": "402bb01e1e1925fc78262a7cbf5baff9a8be1485e10a3260e93aefaa19ee21b6",
+      "source_code": "402bb01e1e1925fc78262a7cbf5baff9a8be1485e10a3260e93aefaa19ee21b6",
+      "equal": true,
+      "source_sha256": "a4b26a62fa3e8cff73c4094478eb54d2972d90388fdc75ae68a93ffbdc17a219"
+    },
+    {
+      "module": "lse_terminal.indicators.weighted_close",
+      "source": "indicators\\weighted_close.py",
+      "bundled": true,
+      "installed_code": "971e794268fe29008fab587c00b0b98591be67041499c0f241bda8cda031ce46",
+      "source_code": "971e794268fe29008fab587c00b0b98591be67041499c0f241bda8cda031ce46",
+      "equal": true,
+      "source_sha256": "134a145f08166227c87c220ed63882ce5493395721ae54e112ed93de21f5f0e2"
+    },
+    {
+      "module": "lse_terminal.indicators.willr",
+      "source": "indicators\\willr.py",
+      "bundled": true,
+      "installed_code": "c94e50442995da38e4cb67b62cc0d8e318a9ca802d23d2c1b330da81b90af753",
+      "source_code": "c94e50442995da38e4cb67b62cc0d8e318a9ca802d23d2c1b330da81b90af753",
+      "equal": true,
+      "source_sha256": "10b1ce4e6e72480ccdbc44f2fb34e2b587c9492ba986825bdedc4269463f3e0e"
+    },
+    {
+      "module": "lse_terminal.indicators.wma",
+      "source": "indicators\\wma.py",
+      "bundled": true,
+      "installed_code": "73414f4419e16febb152d5447322ace594e5301ab55d7783e33251a712800f0a",
+      "source_code": "73414f4419e16febb152d5447322ace594e5301ab55d7783e33251a712800f0a",
+      "equal": true,
+      "source_sha256": "a362be842bf9e97514a86053a6596119bc03be61a63f0925464b1d0bf0a64772"
+    },
+    {
+      "module": "lse_terminal.indicators.woodie",
+      "source": "indicators\\woodie.py",
+      "bundled": true,
+      "installed_code": "27f6608fa21543dfc8c8189df79839b1950c2c0c727f65495569afff056a4277",
+      "source_code": "27f6608fa21543dfc8c8189df79839b1950c2c0c727f65495569afff056a4277",
+      "equal": true,
+      "source_sha256": "726474dddf0ca2f8dc324b6b048e10d3ffb94ea239815e38d1d190a56519413f"
+    },
+    {
+      "module": "lse_terminal.indicators.zigzag",
+      "source": "indicators\\zigzag.py",
+      "bundled": true,
+      "installed_code": "8f7c4cc02bc0deeacf243d62c30d1690ff3affa4b95a374cfa7d6f4b2adc2fdc",
+      "source_code": "8f7c4cc02bc0deeacf243d62c30d1690ff3affa4b95a374cfa7d6f4b2adc2fdc",
+      "equal": true,
+      "source_sha256": "d0eedb415b331f746c6ca0275d543e202978777bc69cf97b4505c128f7985c8a"
+    },
+    {
+      "module": "lse_terminal.indicators.zlema",
+      "source": "indicators\\zlema.py",
+      "bundled": true,
+      "installed_code": "124b173a2f0e2bd2fe01fac6cb29e93d299f5960cd0a525c7417e980aac0abb2",
+      "source_code": "124b173a2f0e2bd2fe01fac6cb29e93d299f5960cd0a525c7417e980aac0abb2",
+      "equal": true,
+      "source_sha256": "d7b01586c58ead696f8c54b34d9b74c22dede70de8aa483b67abffd804e0cddc"
+    },
+    {
+      "module": "lse_terminal.indicators",
+      "source": "indicators\\__init__.py",
+      "bundled": true,
+      "installed_code": "c2532bc1e961921f4dafe118bc63a659d29e8aac3697dab32f7887d0538e6419",
+      "source_code": "c2532bc1e961921f4dafe118bc63a659d29e8aac3697dab32f7887d0538e6419",
+      "equal": true,
+      "source_sha256": "bb1a144adfc2fc3e99be757efff5db1b6d6c5e3f3391b005f64fedeb83bd197e"
+    },
+    {
+      "module": "lse_terminal.ml.blueprint",
+      "source": "ml\\blueprint.py",
+      "bundled": true,
+      "installed_code": "208bfe01a325d26232fc62a3256ff6e1a2c8e40ee520e501379930cb1ee8b026",
+      "source_code": "208bfe01a325d26232fc62a3256ff6e1a2c8e40ee520e501379930cb1ee8b026",
+      "equal": true,
+      "source_sha256": "a5d3bea0291d902abfb741d81701d8b15351a5feaf4237b454a148c72b549f8d"
+    },
+    {
+      "module": "lse_terminal.ml.catalog",
+      "source": "ml\\catalog.py",
+      "bundled": true,
+      "installed_code": "13b39baf0914bd22e8709775aad028da9dcc97d87ff4d43ca11528d96721cc9c",
+      "source_code": "13b39baf0914bd22e8709775aad028da9dcc97d87ff4d43ca11528d96721cc9c",
+      "equal": true,
+      "source_sha256": "ade6c170a2f1b76194a6be8efe397cb44da4a2441c384e4c6b0a2711602cc7ec"
+    },
+    {
+      "module": "lse_terminal.ml.env",
+      "source": "ml\\env.py",
+      "bundled": true,
+      "installed_code": "27ef62b963c47594a3deab1122162f3b71b11cb0995feef09aafe0514003ea56",
+      "source_code": "27ef62b963c47594a3deab1122162f3b71b11cb0995feef09aafe0514003ea56",
+      "equal": true,
+      "source_sha256": "5b57d8ad91b54156b40f18556620cb8407d080502ca501b3f4c52cd626352f8d"
+    },
+    {
+      "module": "lse_terminal.ml.runner",
+      "source": "ml\\runner.py",
+      "bundled": true,
+      "installed_code": "222040ac3f644dd9a14cfa4bcaaa1e34c6b784cd319a14b24302af77c662f06d",
+      "source_code": "222040ac3f644dd9a14cfa4bcaaa1e34c6b784cd319a14b24302af77c662f06d",
+      "equal": true,
+      "source_sha256": "7a845967ebd21fa21aa58d51e094d9072a8dcdd0e90518704527fe63b110e763"
+    },
+    {
+      "module": "lse_terminal.ml",
+      "source": "ml\\__init__.py",
+      "bundled": true,
+      "installed_code": "97d9289e05406e18502984f80eedc986db0d52093094c799b02ab8fc95863a20",
+      "source_code": "97d9289e05406e18502984f80eedc986db0d52093094c799b02ab8fc95863a20",
+      "equal": true,
+      "source_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "module": "lse_terminal.ml.scripts.utils",
+      "source": "ml\\scripts\\utils.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.xgboost_classifier",
+      "source": "ml\\scripts\\xgboost_classifier.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.classification.catboost_predictor",
+      "source": "ml\\scripts\\classification\\catboost_predictor.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.classification.lightgbm_classifier",
+      "source": "ml\\scripts\\classification\\lightgbm_classifier.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.classification.mlp_classifier",
+      "source": "ml\\scripts\\classification\\mlp_classifier.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.classification.random_forest_classifier",
+      "source": "ml\\scripts\\classification\\random_forest_classifier.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.deep_learning.autoencoder_anomaly",
+      "source": "ml\\scripts\\deep_learning\\autoencoder_anomaly.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.deep_learning.cnn_pattern_recognition",
+      "source": "ml\\scripts\\deep_learning\\cnn_pattern_recognition.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.deep_learning.gan_price_simulation",
+      "source": "ml\\scripts\\deep_learning\\gan_price_simulation.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.forecasting.arima_forecaster",
+      "source": "ml\\scripts\\forecasting\\arima_forecaster.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.forecasting.lstm_forecaster",
+      "source": "ml\\scripts\\forecasting\\lstm_forecaster.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.forecasting.prophet_forecaster",
+      "source": "ml\\scripts\\forecasting\\prophet_forecaster.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.forecasting.transformer_forecaster",
+      "source": "ml\\scripts\\forecasting\\transformer_forecaster.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.risk_analysis.copula_dependency",
+      "source": "ml\\scripts\\risk_analysis\\copula_dependency.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.risk_analysis.garch_volatility",
+      "source": "ml\\scripts\\risk_analysis\\garch_volatility.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.risk_analysis.monte_carlo_simulation",
+      "source": "ml\\scripts\\risk_analysis\\monte_carlo_simulation.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.risk_analysis.pca_analysis",
+      "source": "ml\\scripts\\risk_analysis\\pca_analysis.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.risk_analysis.regime_switching_hmm",
+      "source": "ml\\scripts\\risk_analysis\\regime_switching_hmm.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.risk_analysis.var_calculator",
+      "source": "ml\\scripts\\risk_analysis\\var_calculator.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.sentiment.sentiment_analyzer",
+      "source": "ml\\scripts\\sentiment\\sentiment_analyzer.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.time_series.kalman_filter",
+      "source": "ml\\scripts\\time_series\\kalman_filter.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.ml.scripts.time_series.wavelet_decomposition",
+      "source": "ml\\scripts\\time_series\\wavelet_decomposition.py",
+      "bundled": false
+    },
+    {
+      "module": "lse_terminal.providers.decoders",
+      "source": "providers\\decoders.py",
+      "bundled": true,
+      "installed_code": "fe3f92ba256e096f58beb3ea25f84811d816582b0fd363f1dadf0b6f5e6de402",
+      "source_code": "fe3f92ba256e096f58beb3ea25f84811d816582b0fd363f1dadf0b6f5e6de402",
+      "equal": true,
+      "source_sha256": "1e01e2fa407b78e983363196fcc85ed9b36c0de3680b4476f5a8c517d8a70751"
+    },
+    {
+      "module": "lse_terminal.providers.demo",
+      "source": "providers\\demo.py",
+      "bundled": true,
+      "installed_code": "38b6005e9f2b4f2c7a7870d4b95d23ff2dc84916a1b749fa1a33f94d9724988f",
+      "source_code": "38b6005e9f2b4f2c7a7870d4b95d23ff2dc84916a1b749fa1a33f94d9724988f",
+      "equal": true,
+      "source_sha256": "2a1ce21fc589ff0993900bfcc984fc1512914a46001049b7e44ed7d6901b78e0"
+    },
+    {
+      "module": "lse_terminal.providers.lse",
+      "source": "providers\\lse.py",
+      "bundled": true,
+      "installed_code": "8aebf3873d1b3be6ff29b4a702734b485f2fe54c3cc65658563bd6cf9cc6b357",
+      "source_code": "8aebf3873d1b3be6ff29b4a702734b485f2fe54c3cc65658563bd6cf9cc6b357",
+      "equal": true,
+      "source_sha256": "15a466aafefa9198ed3d6a2f472dbfa29eb62b3504278b53b73a8a97efd1c336"
+    },
+    {
+      "module": "lse_terminal.providers.site_stream",
+      "source": "providers\\site_stream.py",
+      "bundled": true,
+      "installed_code": "835165705bc1c5aa3cc0e6c1edcec582053afcbb82ca4d2ad1542cbd776e3401",
+      "source_code": "835165705bc1c5aa3cc0e6c1edcec582053afcbb82ca4d2ad1542cbd776e3401",
+      "equal": true,
+      "source_sha256": "37c581dcdece97dd3fd33c631359230d53e6f3137f5e3f693c827d7a098ae47b"
+    },
+    {
+      "module": "lse_terminal.providers.spread",
+      "source": "providers\\spread.py",
+      "bundled": true,
+      "installed_code": "b0e5e2a30e3f82754ac564b4d1afbaf4aebcd7bd03c06779470f229abf8c6897",
+      "source_code": "b0e5e2a30e3f82754ac564b4d1afbaf4aebcd7bd03c06779470f229abf8c6897",
+      "equal": true,
+      "source_sha256": "b8c88bad2ddfd4ba8b3ba8c91a3764e87beab8be510641e1018f2ec3a2a95e50"
+    },
+    {
+      "module": "lse_terminal.providers.userdata",
+      "source": "providers\\userdata.py",
+      "bundled": true,
+      "installed_code": "4ccf947eb190f0ad82896874d85e56831a4d6e0dbc7f40c7e25d6923ed420031",
+      "source_code": "4ccf947eb190f0ad82896874d85e56831a4d6e0dbc7f40c7e25d6923ed420031",
+      "equal": true,
+      "source_sha256": "e9da761a857b1defbbabde473e7ac873e97741a8eb8f13de7455e730300e6016"
+    },
+    {
+      "module": "lse_terminal.providers",
+      "source": "providers\\__init__.py",
+      "bundled": true,
+      "installed_code": "e8da1e5aeeff7ec623dc4537a369cec970177e47b42cd166978467a59cc8b2a6",
+      "source_code": "e8da1e5aeeff7ec623dc4537a369cec970177e47b42cd166978467a59cc8b2a6",
+      "equal": true,
+      "source_sha256": "b157b8a93de73d884e92a90c6956a703e8e1c6df3d567199d8c1988f78401e1c"
+    }
+  ],
+  "bundled_missing_source": [],
+  "mismatches": []
+}

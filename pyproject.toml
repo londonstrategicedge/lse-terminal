@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "lse-terminal"
-version = "0.0.1"
+version = "0.1.10"
 description = "A free market terminal that runs on your own computer: live charts, an options board, a screener, an economic calendar, a strategy IDE with one click backtests, machine learning on your own data, a research wire, and an AI assistant."
 readme = "README.md"
 license = "MIT"
@@ -18,12 +18,13 @@ classifiers = [
     "Programming Language :: Python :: 3",
 ]
 dependencies = [
-    "lse-data>=0.14.0",
+    "lse-data==0.14.0",
     # The Brue language engine (trade entries, .brue chart indicators).
     # Distribution name is brue-language (the bare "brue" name on PyPI belongs to
-    # someone else); the import stays `import brue`. The connector is the
-    # separate brue-connect package.
-    "brue-language>=0.0.1",
+    # someone else); the import stays `import brue`. Brue Connect, the broker
+    # kit the terminal bundles (`import brueconnect`), ships inside the same
+    # package; 0.0.2 is the first with the broker and starter adapters.
+    "brue-language>=0.0.2",
     "fastapi>=0.110",
     # Pure-python PDF text extraction for the assistant's
     # read_research_paper tool (papers feed -> full text).

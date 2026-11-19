@@ -128,7 +128,8 @@ interface ProCandlestickChartProps {
   onOpenSettings?: (tab?: string) => void;
   showBidAskSpread?: boolean;
   showSessions?: boolean; // Show trading session background boxes (Tokyo, London, NY)
-  // Data source: 'default' uses candles_* tables, 'oanda' uses oanda_* views + oanda_candles_* HTF,
+  // Data source: 'default' uses candles_* tables; the FX/CFD source (the type's other value) uses
+  // its own views and its own higher-timeframe candle tables, named with its prefix,
   // 'ftmo' fetches from /prop/candles/public (public prop demo feed, no login needed),
   // 'prop' fetches from /prop/candles (private firm feed, needs X-Prop-Session auth for live accounts).
   dataSource?: 'default' | 'oanda';
@@ -936,7 +937,7 @@ const ProCandlestickChart = ({
         }
         else if (tfMinutes >= 5) {
           // 5m, 15m, 30m, 1H, 4H timeframes: Use pre-aggregated tables
-          // Map timeframe to table name ('oanda' = oanda_candles_* prefix)
+          // Map timeframe to table name (the FX/CFD source's tables carry its own prefix)
           const htfTableMap: Record<number, string> = dataSource === 'oanda' ? {
             5: 'oanda_candles_5m',
             15: 'oanda_candles_15m',

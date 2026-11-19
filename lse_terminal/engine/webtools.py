@@ -361,7 +361,17 @@ def browse(url: str, max_chars: int = 8000) -> Dict[str, Any]:
                     page.wait_for_load_state("networkidle", timeout=6_000)
                 except Exception:  # noqa: BLE001
                     pass
-                title, final, html = page.title(), page.url, page.content()
+                # The check above saw only the address asked for. A page can
+                # send the browser on (a redirect, a script) to this machine
+                # or the LAN, the terminal's own page included, which shows a
+                # broker's prices; what such an address holds is never read.
+                final = page.url
+                try:
+                    _check_host(final)
+                except ValueError as e:
+                    return {"error": f"the page went on to {final}, which "
+                                     f"web tools do not read: {e}"}
+                title, html = page.title(), page.content()
                 links = page.eval_on_selector_all(
                     "a[href]",
                     "els => els.map(e => ({t: e.innerText.trim().slice(0,70), "

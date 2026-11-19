@@ -83,9 +83,9 @@ class LseProvider(Provider):
     name = "lse"
     title = "London Strategic Edge"
     # tick / 1s / 30s: the vault gate serves 1s
-    # natively and folds 30s from the 1s tables at read time; tick history
-    # has no sync candles endpoint, so it rides the websocket replay
-    # (max 24h back) in _tick_candles below. Futures pairs (ES.F family)
+    # natively and folds 30s from the 1s tables at read time. Tick charts
+    # start empty and append live ticks; historical tick replay is unavailable.
+    # Futures pairs (ES.F family)
     # have no sub-minute bars; the gate's own error message surfaces in
     # the UI status line for those.
     timeframes = ["tick", "1s", "30s", "1m", "5m", "15m", "30m",
@@ -153,32 +153,27 @@ class LseProvider(Provider):
 
     def _refresh_catalog(self) -> None:
         cli = self._lse()
-        # The lse client pins its own catalog copy for the process lifetime;
-        # drop it so a refresh actually reaches the network. (Client-side
-        # refresh flag belongs in the next lse-data release.)
-        try:
-            cli._catalog_cache = None
-        except Exception:
-            pass
+        # Both SDK views cache the same payload. Clear both so a newly
+        # available instrument appears after refresh without restarting.
+        for cache in ("_catalog_cache", "_vault_catalog_cache"):
+            try:
+                setattr(cli, cache, None)
+            except Exception:
+                pass
         rows = cli.catalog()
-        # The catalog carries symbols that only exist as historical vault
-        # datasets (e.g. 6 of the 19 indices; discontinued on
-        # purpose). The gate marks registry-backed rows live=1, but the
-        # client's catalog() view whitelists its columns, so read the
-        # flag from the same cached payload via datasets().
-        live_syms = {d.get("symbol") for d in cli.datasets()
-                     if d.get("live")}
-        # MARKETS lists LIVE pairs only: a catalog row
-        # without a live feed never renders here at all. The archives
-        # stay reachable through the data API for anyone who wants the
-        # history; the terminal's live surface just does not offer them.
+        # The SDK catalog() projection omits availability flags; datasets()
+        # retains them from the same response. Current marks instruments with
+        # recent candle data without the legacy desktop's live-list limit.
+        # Older servers remain usable through live only when current is absent.
+        current = {(d.get("dataset"), d.get("symbol")) for d in cli.datasets()
+                   if d.get("dataset") in _CANDLE_DATASETS
+                   and d.get("current", d.get("live"))}
         items = [
             Instrument(symbol=r["symbol"], name=r.get("name") or "",
                        category=r.get("category") or "", provider=self.name,
                        meta={"dataset": r.get("dataset", ""), "live": True})
             for r in rows
-            if r.get("dataset") in _CANDLE_DATASETS and r.get("symbol")
-            and r["symbol"] in live_syms
+            if r.get("symbol") and (r.get("dataset"), r["symbol"]) in current
         ]
         # Group-contiguous in display order, stable within each group, so
         # the UI can render folders from a single pass. Categories outside
@@ -192,8 +187,12 @@ class LseProvider(Provider):
                 rank[ins.category] = len(rank)
         self._catalog = sorted(items, key=lambda ins: rank[ins.category])
         self._catalog_at = time.time()
-    def search(self, query: str = "", limit: int = 50) -> list[Instrument]:
+    def search(self, query: str = "", limit: int | None = 50) -> list[Instrument]:
         q = query.strip().upper()
+        if limit is None:
+            if q:
+                raise ValueError("unlimited catalogue requests require an empty query")
+            return list(self._instruments())
         out: list[Instrument] = []
         # Symbol prefix matches first (what a trader typing "AAP" wants),
         # then substring hits on symbol or name.
@@ -296,118 +295,18 @@ class LseProvider(Provider):
         out = out.head(want) if forward else out.tail(want)
         return out.reset_index(drop=True)
 
-    # Default tick-history window. 30 minutes of a liquid pair (~24 ticks/s
-    # on BTC/USD) roughly fills the chart's 5000-bar
-    # page; the websocket replay itself allows up to 24h.
-    _TICK_WINDOW_S = 1800
-    # Hard ceiling on one replay collection; a 24h BTC replay would be
-    # millions of rows nobody asked to chart.
-    _TICK_MAX_ROWS = 100_000
-
     def _tick_candles(self, symbol: str, limit: int = 500,
                       start: str | None = None,
                       end: str | None = None) -> pd.DataFrame:
-        """The raw tape as one-bar-per-trade candles (o=h=l=c=price).
-
-        The vault's sync /candles endpoint has no tick resolution (only the
-        async bulk export does), but the websocket replays up to 24h of tape
-        before going live; collect the replay portion and stop at the first
-        live tick. A throwaway client on purpose: the shared REST client must
-        stay websocket-free, and the UI's own live stream (stream() below)
-        already runs on a separate dedicated client.
-        """
-        import time as _time
-
-        from lse import LSE
-
-        def _ts(v) -> float | None:
-            # The ws "ts" field is an epoch float on replay ticks and an ISO
-            # string on live ones (server asymmetry).
-            if v is None:
-                return None
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                try:
-                    return float(_iso_to_epoch(v))
-                except Exception:
-                    return None
-
-        now = _time.time()
-        if start:
-            try:
-                begin = float(start)
-            except ValueError:
-                begin = _iso_to_epoch(start)
-            begin = max(begin, now - 86400)  # replay's own 24h ceiling
-        else:
-            begin = now - self._TICK_WINDOW_S
-        end_ts = None
-        if end:
-            try:
-                end_ts = float(end)
-            except ValueError:
-                end_ts = _iso_to_epoch(end)
-
-        rows: list[tuple] = []
-        # Two attempts: the FIRST replay connection of a long-lived process
-        # was observed coming back empty once on both Linux and Windows
-        # (transient, second call fine), and a genuinely closed market
-        # only pays one extra quick connect-and-replay_complete round trip.
-        for _attempt in range(2):
-            done = threading.Event()
-            client = LSE(api_key=self._key)
-            # replay_complete also fires when the window holds no ticks at
-            # all (closed market); without it the reader would sit waiting
-            # for a live tick and the request would ride the full timeout.
-            client.on("replay_complete", lambda *_: done.set())
-
-            def reader():
-                try:
-                    for t in client.stream([symbol], reconnect=False,
-                                           start=begin):
-                        if not t.replay:
-                            break  # live tape begins; history is complete
-                        ts = _ts(t.timestamp) or now
-                        if end_ts is not None and ts > end_ts:
-                            break
-                        rows.append((ts, t.price, t.volume or 0.0))
-                        if len(rows) >= self._TICK_MAX_ROWS:
-                            break
-                except Exception:
-                    pass  # partial history still charts; errors end collection
-                finally:
-                    done.set()
-
-            th = threading.Thread(target=reader, daemon=True,
-                                  name=f"lse-tick-history-{symbol}")
-            th.start()
-            # The 5-min replay of a liquid pair measured ~1.3s; 30s covers a
-            # slow link without a wedged socket hanging /api/candles.
-            done.wait(timeout=30)
-            client.disconnect()
-            th.join(timeout=5)
-            if rows:
-                break
-
-        if not rows:
-            return pd.DataFrame(columns=CANDLE_COLUMNS)
-        df = pd.DataFrame(rows, columns=["ts", "price", "volume"])
-        df = df.sort_values("ts")
-        # Provider law (same as the hosted API): start-anchored queries page
-        # FORWARD (oldest N from start), everything else returns the newest N.
-        n = max(1, int(limit))
-        df = df.head(n) if start else df.tail(n)
-        out = pd.DataFrame({
-            "ts": df["ts"], "open": df["price"], "high": df["price"],
-            "low": df["price"], "close": df["price"], "volume": df["volume"],
-        })
-        return out[CANDLE_COLUMNS].reset_index(drop=True)
+        """Tick charts begin empty and append the live stream; no replay is offered."""
+        if start is not None or end is not None:
+            raise ValueError("Tick charts are live only; historical tick windows are unavailable.")
+        return pd.DataFrame(columns=CANDLE_COLUMNS)
 
     def prices(self, symbols: list[str]) -> list[dict]:
         """Latest price/bid/ask per symbol from the platform price board
         (data-api /v1/prices, key-gated, max 50 symbols per call). One cheap
-        poll per second replaces per-symbol websocket subscriptions for the
+        budgeted poll replaces per-symbol websocket subscriptions for the
         watchlist. stdlib urllib on purpose: the lse SDK has no wrapper for
         this endpoint yet and `requests` is not in the app's dependency set,
         so no third-party HTTP lib here."""
@@ -660,54 +559,21 @@ class LseProvider(Provider):
                                         limit=min(int(limit), 1000))
 
     async def stream(self, symbols: list[str]):
-        """Bridge lse-data's synchronous tick iterator onto asyncio.
-
-        A dedicated client per stream call keeps websocket state out of the
-        shared REST client; closing the generator disconnects it, which ends
-        the reader thread's iterator.
-        """
-        from lse import LSE
-
-        loop = asyncio.get_running_loop()
-        queue: asyncio.Queue = asyncio.Queue(maxsize=1000)
-        client = LSE(api_key=self._key)
-        done = object()
-        # Some LSE classes stream trade prints without a usable quote (or
-        # with bid == ask == price). A broker always shows both sides, so
-        # those ticks get a locally inferred bid/ask; real quotes pass
-        # through untouched. See providers/spread.py for the model.
-        synth = QuoteSynthesizer()
-
-        def reader():
-            try:
-                for tick in client.stream(symbols):
-                    item = synth.fill({
-                        "symbol": tick.symbol, "price": tick.price,
-                        "bid": tick.bid, "ask": tick.ask, "volume": tick.volume,
-                        "ts": (_iso_to_epoch(tick.timestamp)
-                               if tick.timestamp else None),
-                    })
-                    # put_nowait via call_soon_threadsafe: the reader must
-                    # never block on a slow consumer; drop instead (the UI
-                    # only needs the latest price, not every tick).
-                    def put(i=item):
-                        if not queue.full():
-                            queue.put_nowait(i)
-                    loop.call_soon_threadsafe(put)
-            except Exception as e:  # surfaced to the consumer as an error item
-                loop.call_soon_threadsafe(queue.put_nowait,
-                                          {"error": str(e)[:200]})
-            finally:
-                loop.call_soon_threadsafe(queue.put_nowait, done)
-
-        thread = threading.Thread(target=reader, daemon=True,
-                                  name=f"lse-stream-{id(self)}")
-        thread.start()
+        """Read all terminal markets from the LSE shared price stream."""
+        from lse_terminal.providers.site_stream import stream
+        upstream = stream(self, symbols)
         try:
-            while True:
-                item = await queue.get()
-                if item is done:
-                    break
+            async for item in upstream:
                 yield item
         finally:
-            client.disconnect()
+            await upstream.aclose()
+
+    async def close(self):
+        """Release the shared price connection during engine shutdown."""
+        from lse_terminal.providers.site_stream import close
+        await close(self)
+
+    def close_sync(self):
+        """Stop the old stream before a worker-thread key change or sign-out."""
+        from lse_terminal.providers.site_stream import close_sync
+        close_sync(self)

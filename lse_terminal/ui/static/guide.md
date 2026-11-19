@@ -7,7 +7,7 @@ Everything the terminal does, tab by tab, and how each part works. This is the s
 | MARKETS | Live charts with indicators and drawings, the option board, the news wall, the screener, the trade ticket and account dock | Yes |
 | BACKTEST | Write strategies in Python and run them on your own data, train machine learning models, replay bars and trade by hand | No |
 | ECONOMIC | Release calendar with surprises, national statistics by country, bond yield curves, central bank board | Yes (NEWS: no) |
-| WORKSPACE | The IDE with a real terminal, a chart builder for any table, notebooks on an infinite canvas | No |
+| WORKSPACE | The IDE with a real terminal, dashboards of widgets you code, a chart builder for any table, notebooks on an infinite canvas | No (a widget that reads LSE data: yes) |
 | RESEARCH | New quant papers with an in app reader, interactive quant models fitted to your data | No |
 | MY DATA | Import files, download databank history, manage the library, the ten samples | Only for the databank |
 | TERMINAL WALKTHROUGH | This document: colour coded by area, searchable, cross linked, glossary at the end | No |
@@ -38,16 +38,28 @@ Download the app, open it, and it works with the ten sample datasets that ship i
 
 ## The layout
 
-The header holds the connection control, the five rail tabs, then TERMINAL WALKTHROUGH and MY DATA on the right, the update button and the theme toggle; a secondary bar under the rail lists the active tab's sub views; the left column is the watchlist or the file library; the right rail is the assistant.
+The header holds the connection control, the five rail tabs, then TERMINAL WALKTHROUGH and MY DATA on the right, the update button, NEW WINDOW and the theme toggle; a secondary bar under the rail lists the active tab's sub views; the left column is the watchlist or the file library; the right rail is the assistant.
 
 - **Connection control (top left).** Shows the active data connection ("Live data" or "No data key") and the connected broker. Click it to open the Connections screen (see Connections and keys).
 - **Rail tabs.** MARKETS, BACKTEST, ECONOMIC, WORKSPACE, RESEARCH. Each tab is a page; the secondary bar under the rail carries its sub views (for example MARKETS has PRICE & CHARTS, OPTIONS, NEWS, SCREENER).
 - **TERMINAL WALKTHROUGH and MY DATA (top right).** This document, and your imported files and library, each one click away from every page.
 - **UPDATE.** Hidden until a newer release exists. It then shows the version, downloads it, and offers a restart to install. Source runs check hourly and show a banner instead.
+- **NEW WINDOW.** Opens the view you are on in a window of its own, to put on another monitor (see More than one window, below).
 - **Theme toggle.** Light or dark. The choice is remembered and the page reloads so every chart and panel repaints in the new theme.
 - **Left column.** On MARKETS it is the watchlist (live instruments in folders). On BACKTEST, MY DATA and WORKSPACE it is the library tree: your strategy files, your imported datasets and your notebooks in one list. ECONOMIC, RESEARCH and the walkthrough hide it. A chevron on the divider folds it to a slim strip.
 - **Right rail.** The assistant, plus the trade ticket at the top when you are on MARKETS > PRICE & CHARTS with a live key. Drag its left edge to resize; the double chevron folds it.
 - **Window title.** Follows the charted instrument and timeframe on MARKETS, and names the page elsewhere.
+
+### More than one window
+
+The terminal can be spread over monitors: MARKETS on one, WORKSPACE on another, two charts side by side. Every window is the whole terminal on the same engine, with its own tab open.
+
+- **Open one.** NEW WINDOW in the header opens the view you are on (Ctrl+Shift+N does the same). Ctrl-click, or middle-click, any rail tab or sub view to open that one. In the desktop app a new window goes to a monitor that has none of the terminal's windows yet and fills it; with one monitor it opens beside the window it came from.
+- **Remembered.** The desktop app keeps each window's place, size and view, and brings them all back at the next launch. A window on a monitor that has been unplugged comes back on one that is connected.
+- **Closing.** Closing the main window (the first one) closes the terminal and every window with it. Closing any other window closes only that one, and it is not brought back.
+- **What the windows share.** One account, one engine and one set of your work: starred instruments, chart drawings and layouts, strategy files, notebooks, dashboards and chats are the same in every window, and a change saved in one is kept when another saves. One price allowance too: the watchlist's price calls are made once for all windows, so a second window costs your key nothing extra.
+- **The assistant** is in every window. When it opens something for you ("open this file", "show the chart"), it does so in the window you last used.
+- **In a browser** (the terminal run from source): NEW WINDOW opens a browser window; allow pop-ups for the page if the browser blocks it.
 
 ## MARKETS
 
@@ -55,8 +67,9 @@ MARKETS is live data: charts with indicators and drawings, an options board, a n
 
 ### Price & charts
 
-- **Symbol search and watchlist.** The box in the toolbar searches the whole LSE instrument list with suggestions as you type. The watchlist on the left lists every instrument in collapsible category folders with a logo, name, last price and spread; big folders load 200 rows at a time as you scroll. Clicking a row charts it and points the trade ticket at it. The star on a row (visible on hover) pins the instrument into a WATCHLIST group at the top of the sidebar, one list per data source, remembered with your workspace.
+- **Symbol search and watchlist.** The box in the toolbar searches the whole LSE instrument list with suggestions as you type. Press Enter to chart the instrument whose symbol you typed, in upper or lower case, or the first suggestion when nothing matches exactly. The watchlist on the left lists every instrument in collapsible category folders with a logo, name, last price and spread; big folders load 200 rows at a time as you scroll. Clicking a row charts it and points the trade ticket at it. The star on a row (visible on hover) pins the instrument into a WATCHLIST group at the top of the sidebar, one list per data source, remembered with your workspace.
 - **Timeframes.** From tick and 1 second up to 1 week on LSE data (tick, 1s, 30s, 1m, 5m, 15m, 30m, 1h, 4h, 1d, 1w). Imported files can only be viewed at their native resolution or coarser; finer buttons render disabled with the reason in the tooltip.
+- **When candles do not load.** If a source cannot supply candles for an instrument, the chart area says so in the source's own words and offers Retry; the previous instrument's bars are cleared rather than left under the new name. While an instrument or timeframe is loading the chart area says so, with no bars of the one before. A source that holds fewer bars than a full page shows the bars it has. A connected broker that is still reading older bars is asked again twice, after about 8 and 25 seconds, and the chart fills in to the left; if you have moved or zoomed the chart by then, the older bars wait behind a Show button at the bottom left so the view does not jump.
 - **Chart types.** Candles, Bars, Line, Area. (In this build Bars draws as candles.)
 - **Indicators.** The Indicators button opens a searchable list of every registered indicator, about 115 shipped ones plus anything you write yourself. Click a row to add or remove it, star it to keep it at the top, and open the pencil on an active row to edit its parameters. Active indicators show as chips above the chart. Indicator maths runs in Python inside the engine and comes back with the candles, so the chart and any script you write see the same values.
 - **Custom indicators.** "+ Create custom indicator (Python)" opens the indicator editor: one Python file, `from lse_terminal import indicator`, one decorated function over the candle DataFrame. The draft previews live on the charted symbol while you type, overlay output draws on price, pane output draws below. The editor has examples (EMA cross, RSI, ATR bands), a Docs column with the full parameter and styles reference, and an Ask AI button that hands the code and the last error to the assistant. See Custom indicators.
@@ -82,9 +95,10 @@ The SCREENER sub view is the whole live universe as one sortable table, 100 rows
 
 ### Trading: the ticket and the account dock
 
-- **Trade ticket.** Sits at the top of the right rail on PRICE & CHARTS with a live key. It follows the charted instrument (logo, symbol, name), shows the account line (click it to change account in Connections), SELL at bid and BUY at ask with the spread between them, a size field in the venue's own unit (lots, shares or units), optional stop loss and take profit, and a margin block (one lot value, order value, tick value, margin, free margin after, used) computed from the venue's own terms. Open positions list inline with a one click close. A sash between ticket and assistant divides the rail; drag it, double click to reset.
+- **Trade ticket.** Sits at the top of the right rail on PRICE & CHARTS with a live key, or with a broker connected. It follows the charted instrument (logo, symbol, name), shows the account line (click it to change account in Connections), SELL at bid and BUY at ask with the spread between them, a size field in the venue's own unit (lots, shares or units), optional stop loss and take profit, and a margin block (one lot value, order value, tick value, margin, free margin after, used) computed from the venue's own terms. Open positions list inline with a one click close. A sash between ticket and assistant divides the rail; drag it, double click to reset.
 - **Account dock.** The strip under the chart: Balance, Equity, Open P&L, Used and Free margin, Leverage in the account's currency, with Positions and History tabs. Left or right click a position row for Show on chart, Close 25%, Close half, Close 75%, Close position. The dock's top edge drags to resize and a minimiser folds it to the summary strip.
 - **Where orders go.** With no broker connected, orders route to the LSE demo account (a paper broker with the same contract as a real one). Connect a broker in the Connections screen and the same ticket and dock drive that broker instead. See Connections and keys.
+- **An answer that was lost.** BUY and SELL, and the chart menu's orders, wait while an order is out, so a second press does not place a second order. A broker can take an order, a close or a cancel and never answer it. The ticket then says it may have been carried out ("The order may have been placed: ... Check Positions before placing it again.") and offers **Ask again**, which asks the broker about that same request: the broker answers from its own record and never carries it out twice. Pressing the same order, close or cancel again asks again too. While it is held, any other order (at market or at a level), close or cancel on that connection for the same instrument is sent only after you say yes; one for another instrument goes without a question. If asking again about an order is answered that it is still not known, the ticket also offers **Place as new**: it asks first, because the broker may still carry out the first order, then places the same order again under a new client_id, and the first stays held, its warning on the line, until its own answer. The warning stays on the ticket's line, after any later answer, until the broker has answered about that request. After a reload the ticket opens on a connected broker with a request still out or held, and says it again: one whose answer has not come yet is shown as waiting for that broker's answer, with no **Ask again** (pressing it again asks first), and its answer is shown when it comes; one whose answer was lost is held again, with **Ask again**. A request held on another connected broker is named on the ticket's line with **Show**, which points the ticket at that broker. **Disconnect** asks first while anything is out or held on that broker; what is held is kept, and said again when you connect it.
 
 ## BACKTEST
 
@@ -172,7 +186,7 @@ MY DATA is your library: files you import, files you download from the LSE datab
 - **Import.** Click the drop zone or drop a file anywhere in the app: CSV, TSV, TXT, Parquet, Feather, Excel, JSON (up to 200 MB). Column names are matched loosely (ts, time, date; o/h/l/c or full words; epoch seconds or milliseconds or date strings). A file with open, high, low, close becomes **candles**, chartable and backtestable, with the timeframe inferred; any other timestamped numeric table becomes a **series**, an alternative dataset your strategies read through `data[...]`.
 - **On disk.** Each import is stored as a normalised CSV (ts in epoch seconds) under `~/.config/lse-terminal/data/`, with a `manifest.json` beside them recording name, kind, rows, timeframe, folder, columns and date span. The page prints the exact path with an "open folder" link.
 - **The library tree.** Shared by every page: WORKSPACE (your .py files) above DATA (imports) with folders you create, rename or delete (contents move up), drag and drop between folders, rename and delete on each row, and a tooltip with columns, rows, span and import date. Clicking a dataset from MY DATA takes it to Algo Development as the selected dataset with its preview open; in WORKSPACE the same click copies a `pd.read_csv` snippet instead.
-- **Import from LSE.** The "Import via LSE Data" button on the library toolbar opens the databank: the full recorded history behind the platform, unlocked by your key. Pick a dataset class (markets, options, series, reference), search the catalog (each instrument with its logo, name and years of coverage), choose a timeframe chip (tick and every candle interval), a range chip (Max, 1y, 180d, 90d, 30d, 7d, or custom dates bounded to the instrument's real coverage) and a library folder (default LSE), then Download to library. Candles and series import straight into the library; raw ticks, options and reference tables are saved as Parquet files on disk instead. A quota line shows what your key allows.
+- **Import from LSE.** The "Import via LSE Data" button opens available market candles, economic series and bond yields for your key. Pick a dataset, instrument, supported candle interval, range and library folder, then Download to library. Max reads all stored history available at that interval; finer intervals can have shorter retention. A custom To date includes that day. Reads are paged within your key's request and rate limits and count towards its data quota. Only a complete, validated download is added to the library; a failed download leaves existing data unchanged. Imported candles retain the requested interval and source prices. Existing entries are kept: repeat imports receive a numbered name. Tick history, option histories and reference exports are unavailable here; live ticks and the Options panel remain separate.
 - **Samples.** GOLD, EURUSD, SPX500, BTCUSD (1h), SILVER, BRENT, USDJPY, NAS100, AAPL (1d) and USYIELDS (a daily Treasury curve series) are seeded on first launch into a Samples folder. If you delete one, the RESEARCH model fit bar can add it back.
 - **Preview.** Any dataset opens as a tab with its columns and a 100 row sample; Load more reveals up to 5,000 rows.
 
@@ -188,11 +202,61 @@ ECONOMIC is the macro side: a release calendar with consensus and surprises, nat
 
 ## WORKSPACE
 
-WORKSPACE is the full session: the IDE with an explorer, editor tabs and a real terminal; a data visualisation builder for any table; and a notebook canvas. Entering it unfolds the assistant rail, since the point of the tab is code, data and the assistant side by side.
+WORKSPACE is the full session: the IDE with an explorer, editor tabs and a real terminal; dashboards of widgets you code; a data visualisation builder for any table; and a notebook canvas. Entering it unfolds the assistant rail, since the point of the tab is code, data and the assistant side by side.
 
 - **IDE.** The explorer is the same library tree (WORKSPACE files, DATA, NOTEBOOKS) with Import via LSE Data, Upload, Folder and Script buttons and the on disk path underneath (click to open the folder). Files open in tabs with dirty markers and autosave. New files are created inline (VS Code style), default to `.py`, and never overwrite. RUN runs the open file: a strategy as a backtest on the pinned dataset, anything else as a script. The terminal under the editor is a real PTY in your workspace folder: Shell (your system shell) or Python (the engine's own REPL, with the terminal's packages), with a restart button and a draggable sash. Files live at `~/.config/lse-terminal/workspace/`; allowed types are .py, .md, .txt, .json, .csv and .svg.
+- **DASHBOARD.** Your own boards of widgets, each a few lines of JavaScript that reads the terminal's data and draws it (see Dashboard widgets, below).
 - **DATA VISUALISATION.** Bring a table three ways: open a file (csv, tsv, txt, parquet, feather, xlsx, xls, json, ndjson; parsed in memory, nothing written), paste rows, or pick a library dataset. Then choose from twenty chart forms grouped Compare, Trend, Financial, Distribution, Relationship, Part of whole, Single value and 3D (bar, horizontal bar, grouped bar, line, area, candlestick, scatter, bubble, pie, donut, histogram, box plot, heatmap, radar, treemap, funnel, gauge, 3D bars, 3D scatter, 3D surface). Suggested forms for the loaded table are marked; hovering a tile previews it, clicking commits. The encoding bar assigns columns to X, Y or series (up to eight), size and colour; a palette picker persists; export as SVG or PNG (3D forms are PNG only: drag to rotate, wheel to zoom, double click to reset). A Columns card lists every field with its inferred type and a table view of the first 500 rows. Library rows with enough data show a MODEL button that jumps to RESEARCH > QUANT MODELS with the diffusion simulator fitted to that dataset.
 - **NOTEBOOK.** An infinite canvas per notebook. Blocks: text, sticky note, code, maths (KaTeX), image, ink (pen and highlighter), shapes (line, arrow, rectangle, ellipse, triangle, diamond, star). Toolbar keys: V select, H hand, T text, N sticky, C code, M maths, P pen, G highlighter, E rubber, L A R O Y D S for the shapes, I image; a maths symbol palette with saved equations and handwriting recognition of drawn symbols into LaTeX; Paper sets the background colour and ruling (dots, grid, lines, plain); undo and redo (Ctrl+Z, Ctrl+Shift+Z); Fit everything (Ctrl+0). Images arrive by paste, drop or the picker. Each notebook is one JSON file under `~/.config/lse-terminal/notebooks/`, autosaved; images sit in its assets folder.
+
+### Dashboard widgets
+
+WORKSPACE > DASHBOARD is a board you build yourself. Each widget has a title, a size, a refresh period and its code. **Examples** adds a working one in a click (put/call ratio, price, quotes, yield curve, an economic series, options flow, the release calendar); **Add widget** opens the editor with a live preview on the right and the list of calls beside it. Drag a widget's title onto another to reorder, drag its corner to resize, **+ Board** for another board (double-click a board's name to rename it). Boards are saved on this computer and are the same in every window.
+
+A widget's code is the body of an async function with three things in reach: `lse` (data), `ui` (drawing) and `el` (the widget's own element).
+
+```js
+// Put/call ratio by volume for one underlying
+const chain = await lse.options.chain("SPY");
+let calls = 0, puts = 0;
+for (const c of chain) {
+  if (c.contract_type === "put") puts += Number(c.volume_today) || 0;
+  else calls += Number(c.volume_today) || 0;
+}
+ui.number(puts / calls, { label: "SPY put/call by volume", decimals: 2 });
+ui.share([{ label: "Calls", value: calls, tone: "up" }, { label: "Puts", value: puts, tone: "down" }]);
+```
+
+| Data call | What it answers |
+|---|---|
+| `await lse.candles({ symbol, timeframe, limit, start, end, source })` | Bars, oldest first: `{t, open, high, low, close, volume}`, `t` in seconds. `source` is `"lse"` (the default) or `"mydata"` for an imported file |
+| `await lse.prices([symbols])` | Latest `{symbol, price, bid, ask, ts}` for up to 50 symbols |
+| `await lse.instruments(query, limit)` | Instruments matching a search |
+| `await lse.chart()` | What this window's chart shows: `{symbol, timeframe, source}` |
+| `await lse.options.underlyings()` | The underlyings with option data |
+| `await lse.options.chain(underlying, { type, expiry })` | Every contract: `strike`, `expiry`, `contract_type`, `last_price`, `volume_today`, `premium_today`, `iv` and the Greeks |
+| `await lse.options.flow({ underlying, type, min_premium, limit })` | Option trades, newest first |
+| `await lse.macro.catalog({ dataset, country, search, limit })` | Economic series (`"economics"`) and bond yields (`"bonds"`) with their last value |
+| `await lse.macro.series(symbol, { dataset, start, end, order, limit })` | One series: `{date, value}` |
+| `await lse.calendar({ region, event, start, end, order, limit })` | Economic calendar releases |
+| `await lse.screener({ where, sort, desc, limit })` | The screener's rows, filtered and sorted |
+| `await lse.news()` | The news wire |
+| `await lse.mydata.list()`, `await lse.mydata.rows(name)` | Your imported datasets, and one of them as rows |
+
+| Drawing call | What it draws |
+|---|---|
+| `ui.number(value, { label, sub, decimals, prefix, suffix, tone })` | One figure; `tone` is `"up"` or `"down"` |
+| `ui.line(data, { area, decimals, min, max })` | A line chart of bars, `[t, v]` pairs, `{t, v}` points or plain numbers; several lines as `[{ name, data }]` |
+| `ui.bars(items, { horizontal, decimals, compact })` | Bars of `{label, value, tone}` |
+| `ui.share([{ label, value, tone }])` | The parts of a whole on one bar |
+| `ui.table(rows, { columns, limit })` | A table; a column is a key or `{key, label, align, decimals, format, tone}` |
+| `ui.row(() => { ... })` | What is drawn inside sits side by side |
+| `ui.text(words, { dim, small })`, `ui.canvas((ctx, width, height) => { ... })` | A line of words; a canvas to draw on by hand |
+
+- **What a widget cannot do.** It runs in a sealed frame: it reads LSE data and your own files through the calls above and nothing else. It cannot place or change an order, read a key, read a connected broker's prices (a broker's terms can keep those with the chart and the ticket), or load anything from the internet.
+- **Allowances.** Prices come from the terminal's one shared price call, so widgets add none. Every other call counts against your key like the page that shows the same data; a widget may ask 40 times a minute and a board 160, and a widget that asks more is told so in its own frame.
+- **When a widget stops.** Its header says Stopped and the widget shows the error; Edit opens the code with the same error under the preview. Ctrl+Enter runs the code, Ctrl+S saves.
+- **Ask the assistant.** It has this section: ask it for a widget and paste the code it gives into Add widget.
 
 ## RESEARCH
 
@@ -221,6 +285,7 @@ The right rail is one panel with two kinds of AI behind it: **Veron**, hosted by
 
 - **Providers.** Claude (Anthropic's Claude Code CLI) and ChatGPT (OpenAI's Codex CLI). Pick one in the provider menu at the top of the rail; the row shows its status (Not installed, Sign in, the account email, Ready). Anything other than Veron runs on your own account and your own subscription; the terminal never proxies it.
 - **Install and sign in.** If the CLI is missing, an Install button runs its npm install with the output streaming into the panel. Log in runs the CLI's own login: the browser link (and a paste the code field when the CLI asks) appears in a card, and success posts your signed in identity. Account & usage in the `/` menu shows the identity, connection mode (subscription, API key or Foundry), sign out, and remove connection.
+- **Models.** The model button at the top of the rail, and Switch model in the `/` menu, list the models your own CLI offers for your account, in its own words. The terminal asks the CLI each time the menu opens, so a model your provider releases appears there without an app update, and one it withdraws leaves. A CLI lists only the models it knows, so when a newer version of the CLI is out the menu offers it as one row, "Update Codex to …" or "Update Claude Code to …": one click (or `/update`) runs the CLI's own updater, a few seconds, and the menu then lists the new models. After that first update the terminal keeps that CLI up to date by itself, never while it is answering you, and tells you in the chat each time it has; `/autoupdate off` stops that and `/autoupdate on` turns it back on. A CLI you installed with the terminal's Install button is kept up to date from the start. A model that needs a newer CLI is shown dimmed with the version it needs. Custom model… takes any model name the CLI accepts, and `/model default` returns to the CLI's own choice.
 - **What it is told.** On the first turn the agent receives a brief: what the app is, where your data lives, the strategy contract, the pin lines, the tools, this walkthrough, and anything you wrote in USER.md. The brief is also written to `~/.config/lse-terminal/ai-workspace/` as `LSE-TERMINAL.md`, `CLAUDE.md`, `AGENTS.md`, `GEMINI.md`, `QWEN.md` (one text under every name the CLIs read) beside `GUIDE.md`, `context.json` (the live app state, refreshed every turn), `strategy.py` (a mirror of your open editor) and `backtest.py` (a runner the agent can call).
 - **USER.md.** The one hand editable instruction file, opened from the gear in the rail. Trading style, preferred markets, risk rules, tone: everything you write there is appended to what every agent is told.
 - **Its tools.** The terminal exposes its own capabilities to the agent as native tools: run_backtest, run_walkforward, run_montecarlo, get_candles, list_datasets, get_positions, get_fills, get_economics (the macro calendar for event studies), import_lse_data (pull a databank instrument into your library), list_research and read_research_paper, read_guide, list_ml_models, build_ml_dataset, generate_ml_blueprint, run_ml_blueprint, get_ml_job, open_in_app (opens a dataset, a file, or a page on your screen), list_workspace, read_workspace_file, write_workspace_file, run_python (runs a script in the workspace), web_search, fetch_url, browse, remember and recall. The tool strip under the chat header lists them; click one for its parameters. The same tools are served on `http://127.0.0.1:<port>/mcp` for any other MCP client on your machine (a Claude Code session in an editor, Claude Desktop).
@@ -236,11 +301,27 @@ The indicator editor and the research reader carry Ask AI buttons that unfold th
 
 ## Connections and keys
 
-The connection control top left opens the Connections screen: your LSE data key first, then the brokers. Broker credentials never leave your machine.
+The connection control top left opens the Connections screen: your LSE data key first, then the brokers, including any broker you add yourself. Broker credentials never leave your machine.
 
-- **DATA CONNECTION.** The London Strategic Edge card: key set or not, Add key or Change key with an inline field, proved against the live API before it is trusted. One key unlocks MARKETS, OPTIONS, SCREENER, ECONOMIC, the databank, and Veron.
-- **BROKERS.** For now the list offers the LSE demo account (`lse-sim`), a paper broker that speaks the same contract a real broker will, and one line announcing that other venues are upcoming. When a venue is listed, its row expands to a credential form generated from the broker's own handshake (what you type is stored by the engine in that broker's private state folder and rides no protocol message) or to a browser login the engine opens and waits on (up to five minutes; a chooser appears if the broker offers several accounts); a live money broker requires an explicit confirmation and orders are refused until a successful connect has armed it; disconnecting returns the ticket to the demo account; a connected broker that serves candles can also be chosen as the chart's data source.
-- **Inquire.** The one coloured control on the screen (bottom right) opens the broker inquiry form (firm, website, contact, work email, asset classes, regulator, message) for firms that want to be listed. It posts to London Strategic Edge, not to your engine.
+- **DATA CONNECTION.** The London Strategic Edge card: key set or not, Add key or Change key with an inline field, proved against the live API before it is trusted. One key unlocks MARKETS, OPTIONS, SCREENER, ECONOMIC, the databank, and Veron. The LSE demo account comes with that key; it is where the ticket trades when no broker is connected, and it is not a row in the broker list.
+- **BROKERS.** One row per venue. First the brokers this terminal ships an adapter for, such as Alpaca, each a row of its own with its key boxes; then any London Strategic Edge lists; then the ones you linked yourself; then "+ Add your own broker". A listed venue this build cannot run yet says "update to use". Click a row to open it; the connected one is open already.
+- **Keys.** A broker that needs keys shows its key boxes as soon as you open its row. For a listed venue the fields come from its listing; for a broker you linked they come from the adapter's own handshake. What you type stays in the boxes while the screen refreshes itself; it is held in memory only, and is dropped when you press Connect, close the row or the screen, or unlink the broker. If a box a listing marks required is empty, Connect says which and sends nothing; if a broker you linked refuses, the card shows its own message and names the boxes you left empty. What you type is stored by the engine in that broker's private folder on this machine and handed to the adapter as environment variables when it starts. It rides no protocol message and is never sent to London Strategic Edge. Once keys are saved the card says which fields are saved (never their values) and Connect uses them without asking again. Change opens the form; a box left empty keeps the saved value; Forget keys deletes them, and it is the only thing that does.
+- **Connecting.** Connect opens the session. A broker with its own login page opens it in your browser and waits (up to five minutes); a login that reaches several accounts lists them all, marks each LIVE or DEMO, and takes two clicks to choose one. If a connect fails, the reason is shown on the card in the broker's own words, whole, and Connect can be pressed again; for a broker you linked, the last lines its adapter printed are shown under it. A broker linked from a row we list keeps that row's note on making its key beside its boxes (OANDA's note also says who may not use its API). While a broker you linked is connected, and after it disconnects or stops, its card keeps the lines its adapter printed under "Lines the adapter printed". For a broker whose prices stay on this computer, that card is where they are kept: the terminal's own log gets a line saying so instead (only what a file of your own prints before it first answers the terminal, which has not yet said its terms, goes to the log).
+- **Real money.** A broker whose mode is anything but paper asks before it can trade. It asks when you press Connect: "Allow trading" or "Connect read-only". A login that reaches several accounts, none chosen yet, is not asked then, because whether it is live belongs to the account. Once you choose one, its card says whether that account is live and offers Allow trading; a login that turns out to reach one account asks as soon as it has connected. So does one that was paper when it last connected (a file of your own you have just set to live, say): it asks as soon as it has connected, and stays read-only until you answer: "Allow trading" or "Stay read-only". While that question is up, the card behind it already shows the connection as it is: connected, read-only. Read-only shows the account, positions and prices, and the engine refuses every order; the card says so and offers Allow trading, and the top left line reads "(LIVE, read-only)". Allowing lasts for that connection only: disconnect and connect again, and you are asked again. Paper brokers never ask.
+- **A broker's terms.** Some brokers license their prices to you alone, and some have you place every order on a live account yourself. Such a broker's row says so in one line under its name, with "Read the terms" for its own page, and the Allow trading question repeats it. When a broker's prices are yours alone, the chart, the ticket, the positions and your own strategies use them on this computer as usual, and nothing sends them on: the assistant, Veron or your own agent, is told the balance, the sizes and the entry prices, but not the prices or the figures worked from them (open P/L, equity, margin), no screenshot of the window is taken for it while those prices are on screen, and its tools and any code it runs get a sentence saying why instead of the prices. When every order is placed by you, the ticket, the dock and the chart work as usual on the live account, and an order the assistant or any other program sends is refused with the reason. On a paper account the assistant can still trade. Terms we list for a broker hold from before its first connect; when the broker and our listing both state terms, the stricter of the two applies.
+- **Use and Disconnect.** A connected broker that serves candles offers Use, which makes it the source for the sidebar and the chart: its instruments, its prices, and the ticket trades it. The sidebar holds up to 5,000 instruments of a venue and says so when the venue has more ("showing 5,000 of 13,575; search for the rest"); search reaches all of them and puts an exact symbol first. Backtests and research stay on your data connection. Disconnect returns the ticket to the demo account.
+- **Ask to be listed.** "Are you a broker? Ask to be listed", at the foot of the screen, opens the broker inquiry form (firm, website, contact, work email, asset classes, regulator, message) for firms that want to be listed. It posts to London Strategic Edge, not to your engine.
+
+### Add your own broker
+
+For a broker the terminal does not ship, add an adapter: a small Python program on this computer that talks to your broker's API. Your keys are kept on this computer and handed only to that program. You need Python 3.10 or newer, and your broker's API keys and its API documentation.
+
+1. **Get the starter adapter.** Open the Connections screen with the control at the top left (it names your data source and has a small arrow), press "+ Add your own broker", then "Create my starter adapter". It puts `my_broker_adapter.py` in a folder of your own, `LSE Terminal/brokers` in your home folder, and fills in its path in step 2 for you; "Open folder" shows it. A file already there is yours and is kept as it is. In a browser, "or download it" saves the file instead, and your browser's downloads list shows where ("Show in folder", or "Show in Finder" on a Mac).
+2. **Try it as it is.** In the same card, under "Add it to the terminal", give it a broker name (it becomes the broker's ID on this computer, such as `acme-markets`). The file's path is filled in if step 1 created it; otherwise paste its full path (on Windows: right-click it, "Copy as path"). Press Test and add. The starter needs nothing under "More options". The terminal runs the file once before it adds anything; if that fails, nothing is added and the card shows the file's own error and the last lines it printed. The new row asks for an API key and an API secret: type anything in both, press Connect, then Use. The chart shows its instruments and the ticket and the account dock trade on it, on practice prices made inside the file: the instruments are made up, and nothing leaves your computer.
+3. **Make it yours.** Open the file in a text editor. Every line that begins `# YOUR BROKER:` marks a place where your broker's API call goes. If your broker needs other key boxes than an API key and an API secret (a username and a password, say), change `credential_form` and the names `broker_login` takes to match. What is typed in a box reaches the file as `BRUE_CRED_` and the box's key in capitals: `api_key` is `BRUE_CRED_API_KEY`, and a box with the key `username` is `BRUE_CRED_USERNAME`. Keep `mode = "paper"` while it trades a demo account. For real money set `mode = "live"`: the terminal then asks you when it connects, and sends it no order until you press Allow trading, on each new connection.
+4. **Test it.** Open "For developers: test your adapter on this computer" at the foot of the card: it shows the command for this computer and how to run it in the folder where the file is. It tests the file named `my_broker_adapter.py` there: if your browser saved it under another name, such as `my_broker_adapter (1).py`, rename it first; if you gave it a name of your own, put that name in its place in the command (a name with no spaces is simplest). It runs the broker kit's test of an adapter, which places and closes orders, so run it only on practice prices or a demo account; it does not test a file whose mode is not paper. It hands the file `practice` as its key and secret, as `BRUE_CRED_API_KEY` and `BRUE_CRED_API_SECRET`: if you changed the key boxes, change those names in the command to match (step 3): `BRUE_CRED_USERNAME` and `BRUE_CRED_PASSWORD` for a username and a password. Once the file calls your broker, put your demo key and secret there instead, and only demo ones, because the window keeps a record of what was typed in it. It has passed when its last line says `0 fail`; a line marked SKIP is a test that does not apply to this file.
+5. **After you edit the file.** Save it, then press Disconnect and Connect on its row: each Connect starts the file afresh, so it need not be unlinked and added again. If you changed its key boxes, the row shows the new ones after that Connect, and the file refuses to connect while one is empty: type in them and press Connect again. If it no longer starts, the row shows its error and the last lines it printed. Only a file that has moved or been renamed is unlinked and added again.
+6. **Unlink.** Unlink, on the row's card, disconnects it, takes it off the list and deletes the keys saved for it. It leaves your file alone, and anything the adapter kept in its own folder. Linked brokers are kept in `~/.brue-connect/` (`brokers.json`, and one private folder per broker under `state/`).
 
 ## Custom indicators
 
@@ -258,7 +339,7 @@ def my_ind(df, length=20):
 - The function receives the candle DataFrame (`ts`, `open`, `high`, `low`, `close`, `volume`) and each parameter as a keyword argument.
 - `params` is a dict keyed by parameter name; each value is a dict with `type` (int, float, bool, str) and optional `default`, `min`, `max`. The parameter editor is generated from it.
 - Return a Series for one line, or a DataFrame for one line per named column, the same length as `df`. `overlay=True` draws on the price chart, `False` in its own pane. Per column render hints go in `styles`, for example `styles={"hist": {"kind": "histogram"}}`.
-- Save from the editor and the indicator appears in the Indicators list under Your indicators; the draft previews live on the charted symbol while you type. Files live in `~/.config/lse-terminal/indicators/` and load with the engine. `.brue` indicator scripts sit in the same folder (older-format files still load).
+- Save from the editor and the indicator appears in the Indicators list under Your indicators; the draft previews live on the charted symbol while you type. Files live in `~/.config/lse-terminal/indicators/` and load with the engine. `.brue` indicator scripts sit in the same folder.
 
 ## Where things live on this computer
 
@@ -268,14 +349,15 @@ Everything the terminal writes sits under one folder, `~/.config/lse-terminal/` 
 |---|---|
 | `config.json` | Your LSE key and settings, owner only permissions |
 | `data/` | Imported datasets as normalised CSV, plus `manifest.json` |
+| `workspace.json` | Your chart drawings, layouts and settings, starred instruments, and your dashboards |
 | `workspace/` | Your strategy files and scripts (the WORKSPACE and BACKTEST explorer) |
 | `notebooks/` | One JSON per notebook, images in `assets/` |
-| `indicators/` | Your custom indicators (.py and .brue; older-format files still load) |
+| `indicators/` | Your custom indicators (.py and .brue) |
 | `ml/datasets/` | Datasets built for machine learning |
 | `ai-workspace/` | The agent brief, `GUIDE.md`, `context.json`, `strategy.py`, `backtest.py`, `USER.md`, checkpoints, `tested_runs.json` |
 | `chats/` | Your assistant conversations |
 | `assistant_memory.json` | What the agent has been asked to remember about you |
-| A broker's state folder | That broker's credentials and tokens, written by the engine only |
+| A broker's state folder | That broker's credentials and tokens, written by the engine, and whatever its adapter keeps there (the starter adapter keeps its practice account in it) |
 
 ## Desktop app and hosted preview
 
@@ -287,7 +369,7 @@ The downloaded app is the full product. A hosted preview of the same interface r
 
 ## Privacy: what leaves your machine
 
-Your data files, strategies, notebooks, chats and broker credentials stay on your disk. Five things leave it, each only when you use the feature.
+Your data files, strategies, notebooks, chats and broker credentials stay on your disk, and so do the prices of a broker whose terms license them to you alone, with the P/L and margin worked from them: they go to neither assistant, nor into a screenshot (see Connections and keys, *A broker's terms*). Five things leave it, each only when you use the feature.
 
 - **Your LSE key** goes to London Strategic Edge with every live data, databank and assistant request, from your engine, never from the page.
 - **Assistant messages** and the context that goes with them (page, chart symbol, open file contents, terminal tail, dataset names and shapes) go to the Veron service, and so does whatever its local tools return: the dataset list, a preview of up to 30 rows when it asks for one, and backtest statistics. The files themselves stay local; the assistant asks your terminal to run code on them here.
@@ -305,6 +387,8 @@ The shortcuts and pointer gestures the terminal answers to, page by page.
 - Watchlist and library: click to chart or select; right click a dataset for Rename and Delete; drag a dataset into a folder.
 - Account dock: left or right click a position row for the close menu; drag the dock's top edge to resize.
 - Right rail: drag its left edge to resize; the double chevron folds it; the sash between ticket and assistant divides the height, double click resets it. Type `/` in the composer for the command menu.
+- Windows: Ctrl+Shift+N opens the view you are on in a new window; Ctrl-click or middle-click a rail tab or sub view opens that one in a new window.
+- Dashboard: drag a widget's title onto another to reorder; drag its corner to resize; in the editor Ctrl+Enter runs, Ctrl+S saves, Escape closes.
 - Notebook: V H T N C M P G E I and the shape letters L A R O Y D S select tools; Ctrl+Z, Ctrl+Shift+Z, Ctrl+0.
 - News globe: drag rotates, wheel or pinch zooms, double click open ocean resets.
 
@@ -318,6 +402,8 @@ The questions new users ask most, with the answer and where in the app it lives.
 - **My strategy has zero trades.** Loosen the entry conditions or check the timeframe: hourly parameters on daily data rarely fire. The assistant loosens parameters itself for up to three attempts.
 - **Where did my import go?** MY DATA prints the on disk path with an open folder link; the library tree shows it under DATA, in the folder you chose.
 - **A model card says SETUP.** Its libraries are not installed. Select the model and press Install in the banner; pip streams into the terminal's own Python and the tag disappears when it finishes.
+- **Can I use more than one monitor?** Yes. NEW WINDOW in the header, or Ctrl-click any tab, opens it in its own window; the desktop app puts it on a free monitor and remembers the arrangement.
+- **Can I build my own display of the data?** Yes: WORKSPACE > DASHBOARD. Start from an example (the put/call ratio is the first) and edit its code.
 - **Can I use my own AI?** Yes: pick Claude or ChatGPT in the rail's provider menu, install if asked, sign in with your own account. It gets the terminal's tools and this walkthrough.
 - **Does the terminal trade for me?** No. The ticket and dock are manual. Strategies backtest; they do not place orders.
 - **How do I ask about the terminal itself?** Ask the assistant. It has this walkthrough in front of it every turn and reads the full section before answering in detail.
@@ -336,6 +422,7 @@ The terms this walkthrough and the interface use, in alphabetical order, each wi
 - **Blueprint.** A short Python script that trains one machine learning model through `lse_terminal.ml.blueprint.train(...)`; the ML page writes it, you edit and run it.
 - **Brief.** The document your own agent receives on its first turn: what the app is, where your data lives, the strategy contract, the tools, this walkthrough, and your USER.md.
 - **Candles.** Open, high, low, close and volume per bar; the dataset kind that charts and backtests use.
+- **Dashboard.** WORKSPACE > DASHBOARD: a board of widgets you code yourself, saved on this computer.
 - **Databank.** The recorded history behind the platform, downloadable into your library by symbol and timeframe with your key (Import via LSE Data).
 - **Dataset.** One entry in your library: an imported file, a databank download or a sample, with a symbol, a kind and a timeframe.
 - **Drawdown.** The largest fall in equity from a peak to the following trough, in money and in percent.
@@ -369,5 +456,6 @@ The terms this walkthrough and the interface use, in alphabetical order, each wi
 - **USER.md.** Your own standing instructions to the assistant, edited from the gear in the rail and appended to everything the agents are told.
 - **Walk forward.** Sweeping a strategy's parameters on each training window and measuring on the untouched window after it, fold by fold, with an efficiency ratio.
 - **Watchlist.** The left column on MARKETS: every live instrument in category folders with logo, name, price and spread.
+- **Widget.** One tile of a dashboard: a title, a size, a refresh period and a few lines of JavaScript that read the terminal's data and draw it. (The rail's NEWS, CALENDAR, OPTIONS and QUOTES cards on MARKETS are ready made and take no code.)
 - **Win rate.** Winning trades as a share of all closed trades.
 - **Workspace.** The folder of your strategy files and scripts, `~/.config/lse-terminal/workspace/`, shown in the BACKTEST and WORKSPACE explorers.

@@ -43,7 +43,7 @@ const STAGGER = ['1h', '4h', '1d', '15m', '5m', '1w', '30m', '1m'];
 function Panel({
   symbol, timeframe, colors, active, onActivate,
   syncedCrosshairTime, onCrosshairMove, syncedViewportTime, onViewportTimeChange,
-  quote,
+  quote, priceSource,
 }: {
   symbol: string; timeframe: string; colors: any; active: boolean;
   onActivate: () => void;
@@ -52,6 +52,8 @@ function Panel({
   syncedViewportTime: number | null;
   onViewportTimeChange: (t: number | null) => void;
   quote?: { bid: number; ask: number } | null;
+  // the shell's source, whose declared price digits the panel prints with
+  priceSource?: string | null;
 }) {
   const [candles, setCandles] = useState<Candle[]>([]);
   // Timezone must be forwarded to ProChart: its prop default is 'UTC', which
@@ -104,6 +106,7 @@ function Panel({
         <ProChart
           candles={candles}
           symbol={symbol}
+          priceSource={priceSource}
           timeframe={timeframe}
           chartType="candlestick"
           livePrice={candles[candles.length - 1]?.close ?? null}
@@ -125,7 +128,7 @@ function Panel({
 }
 
 export default function TerminalMultiGrid({
-  layout, syncSettings, pair, timeframe, colors, quote,
+  layout, syncSettings, pair, timeframe, colors, quote, priceSource,
 }: {
   layout: LayoutType;
   syncSettings: SyncSettings;
@@ -133,6 +136,8 @@ export default function TerminalMultiGrid({
   timeframe: string;
   colors: any;
   quote?: { bid: number; ask: number } | null;
+  // the shell's source, which every panel charts
+  priceSource?: string | null;
 }) {
   const cfg = LAYOUTS[layout] || LAYOUTS['2x2'];
   // Selection and per-panel symbols live in layoutStore, not local state: the
@@ -180,6 +185,7 @@ export default function TerminalMultiGrid({
           syncedViewportTime={syncSettings.syncTime ? viewT : null}
           onViewportTimeChange={onView}
           quote={quote}
+          priceSource={priceSource}
         />
       ))}
     </div>

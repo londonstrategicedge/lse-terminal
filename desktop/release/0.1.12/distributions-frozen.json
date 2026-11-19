@@ -1,0 +1,9 @@
+{
+  "click": "8.4.2",
+  "markupsafe": "3.0.3",
+  "numpy": "2.4.6",
+  "pip": "26.2.1",
+  "pydantic": "2.13.4",
+  "pywinpty": "3.0.5",
+  "websockets": "16.1.1"
+}

@@ -13,6 +13,23 @@ const MAX_STREAM_SYMBOLS = 16; // free-plan concurrent stream allowance
 const OVERLAY_PALETTE = ["#8b8b93", "#c9c9cf", "#6e6e76", "#a8a8b3"];
 const PANE_PALETTE = ["#a1a1aa", "#7dd3fc", "#fbbf24", "#f0abfc"];
 
+// Exact legacy spellings verified against the LSE symbol registry.
+// These supply display metadata only; data reads, stars and broker orders
+// keep the requested spelling. Never guess across asset classes (GOLD is a share).
+const LSE_SAVED_SYMBOLS = Object.freeze({
+  "ES.F": "SP500.F", "NQ.F": "NASDAQ100.F", "GC.F": "GOLD.F",
+  "SI.F": "SILVER.F", "VIX/USD": "VIX.IDX",
+});
+function catalogInstrument(symbol, bySymbol) {
+  const lookup = (name) => bySymbol
+    ? bySymbol.get(name) : state.instruments.find((item) => item.symbol === name);
+  const exact = lookup(symbol);
+  if (exact || state.provider !== "lse") return exact;
+  const canonical = LSE_SAVED_SYMBOLS[symbol];
+  const item = canonical && lookup(canonical);
+  return item ? { ...item, symbol } : undefined;
+}
+
 const state = {
   // The active rail tab decides the provider: MARKETS = "lse" (live data,
   // needs the free API key), BACKTEST / MY DATA = "userdata" (imported
@@ -24,7 +41,7 @@ const state = {
   symbol: null, timeframe: "1h", chartType: "candles",
   activeIndicators: [],            // [{name}] params use registry defaults
   favoriteIndicators: [],          // registry names starred in the picker; float to the top
-  instruments: [], ws: null, lastBar: null, prices: {}, quotes: {}, candleData: [],
+  instruments: [], ws: null, lastBar: null, prices: {}, quotes: {}, priceTimes: {}, candleData: [],
   logos: {},                       // symbol -> {light, dark} watchlist logo URLs
   // Starred instruments per SOURCE: provider name ->
   // [symbol]. A broker's list is its own (its symbol space, its catalog),
@@ -54,8 +71,47 @@ const API_PREFIX = APP_BASE === "/" ? "" : APP_BASE.replace(/\/$/, "");
 }
 
 const $ = (id) => document.getElementById(id);
-const status = (msg) => { $("status").textContent = msg; };
-const fmt = (p) => p >= 1000 ? p.toFixed(1) : p >= 10 ? p.toFixed(2) : p.toFixed(4);
+// Words from elsewhere (an engine's detail, an exception, a listing's line,
+// an installer's output) as one line, whole: runs of spaces, tabs and line
+// breaks read as one space. Where a layout needs a cut, the element cuts it
+// with a visible "…" and keeps the whole as its tooltip; the words are not
+// cut here.
+function oneLine(text) {
+  return String(text == null ? "" : text).replace(/\s+/g, " ").trim();
+}
+
+/* A key box (an LSE key, a broker's secret) that no browser offers to save
+   or fill. A password box is what a browser's password manager takes for a
+   login, and autocomplete="off" does not stop it: with Chrome's manager on,
+   a broker's row was offered for saving and its login email kept in
+   Chrome's store. So the box is a text box, masked by -webkit-text-security
+   (the stylesheet's .cs-secret) where the browser has it: Chromium, which is
+   the desktop app, Chrome and Edge. A browser without it gets a password box
+   back, so what is typed is never shown (its own manager may then offer to
+   save, as before). No name; the ignore marks password manager extensions
+   read; copy and cut of what it holds are refused, as a password box
+   refuses them; a paste is taken. The input, for chaining. */
+function csSecretBox(inp) {
+  const masked = typeof CSS !== "undefined" && !!CSS.supports && CSS.supports("-webkit-text-security", "disc");
+  inp.type = masked ? "text" : "password";
+  inp.autocomplete = "off";
+  inp.spellcheck = false;
+  inp.classList.add("cs-secret");
+  inp.dataset.secret = "1";
+  inp.setAttribute("autocapitalize", "off");
+  inp.setAttribute("autocorrect", "off");
+  inp.setAttribute("data-1p-ignore", "");
+  inp.setAttribute("data-lpignore", "true");
+  inp.setAttribute("data-bwignore", "");
+  inp.setAttribute("data-form-type", "other");
+  for (const t of ["copy", "cut", "dragstart"]) inp.addEventListener(t, (e) => e.preventDefault());
+  return inp;
+}
+let statusMessage = "", pricePollError = "";
+function paintStatus() { $("status").textContent = [statusMessage, pricePollError].filter(Boolean).join(" · "); }
+const status = (msg) => { statusMessage = msg; paintStatus(); };
+function setPricePollError(message) { pricePollError = message; paintStatus(); }
+const fmt = (p, by = p) => by >= 1000 ? p.toFixed(1) : by >= 10 ? p.toFixed(2) : p.toFixed(4);
 // Spread readout under each watchlist price: FX rows in
 // pips ("spread: 0.1 pips"), everything else in price units, because a pip
 // is an FX unit. Two significant digits covers the non-FX universe without
@@ -73,6 +129,65 @@ function pipSize(symbol, refPrice) {
   const dec = Math.max(seen, refPrice >= 20 ? 3 : 5);
   return Math.pow(10, -(dec - 1));
 }
+// A venue's own price, printed with the `digits` its catalog declares for the
+// instrument (a whole number from 0 to 20; anything else is 0) cut to what a
+// price of its size can use: max(2, 6 - floor(log10(size))) places, about
+// seven significant figures and at least two, so fewer than two only when
+// fewer are declared. The size is |scale| when a finite, non-zero `scale` is
+// given, else |value|; a size of 0 keeps `digits`.
+// The sidebar, the spread, the dock and History pass the instrument's current
+// max(bid, ask) (quoteScale), as the ticket does, so one instrument's prices
+// share their places: "9999.80" beside "10000.10". No zero is trimmed
+// ("1.28080"); nine declared places of a coin at 73100.5 print "73100.50".
+// The same rule, and the same size, as the chart's formatPriceForSymbol, which
+// is handed this instrument's max(bid, ask) too, so a declared instrument's
+// chart labels and these print the same places beside a power of ten. "" for a
+// value that is missing or not a finite number; plain
+// decimals (toFixed turns to the exponent form only from 1e21). Display only:
+// nothing an order SENDS passes through here.
+function fmtPx(value, digits, scale) {
+  const n = Number(value);
+  if (value == null || value === "" || !isFinite(n)) return "";
+  const d = Math.min(20, Math.max(0, Math.trunc(Number(digits)) || 0));
+  const by = Math.abs(scale != null && isFinite(Number(scale)) && Number(scale) !== 0 ? Number(scale) : n);
+  const fits = by > 0 && isFinite(by) ? Math.max(2, 6 - Math.floor(Math.log10(by))) : d;
+  return n.toFixed(Math.min(d, fits));
+}
+// The decimals the active SOURCE declares for one of its instruments, or null
+// when it declares none (LSE and imported files: their rows carry no digits
+// and their prices keep the magnitude rule in fmt). Filled by loadInstruments.
+function srcDigits(symbol) {
+  const d = (state.digitsBySym || {})[symbol];
+  return Number.isInteger(d) && d >= 0 && d <= 20 ? d : null;
+}
+// The size one instrument's prices choose their places by: its quote's larger
+// side, max(|bid|, |ask|), as the ticket's three numbers use; undefined with no
+// usable quote, when each value is its own size (fmt, fmtPx). Near a power of
+// ten a bid and an ask chose different places, and so did one tick and the
+// next: "9999.800" beside "10000.10".
+function quoteScale(q) {
+  if (!q || typeof q !== "object") return undefined;
+  const sides = [q.bid, q.ask].map(Number).filter((v) => isFinite(v) && v !== 0).map(Math.abs);
+  return sides.length ? Math.max(...sides) : undefined;
+}
+// A price of the active source, for the sidebar: from the instrument's digits
+// when the source declares them, by magnitude otherwise, at the places its
+// current quote's size gives (quoteScale). fmt alone printed a venue's
+// 0.0000189 as "0.0000".
+function fmtQuote(symbol, p) {
+  const d = srcDigits(symbol);
+  const by = quoteScale((state.quotes || {})[symbol]);
+  return d == null ? fmt(p, by) : fmtPx(p, d, by);
+}
+// A level read off the chart (the right-click menu's "@ price"): the same
+// digits, but no more decimals than five significant figures need, because
+// the level comes from a pixel and nine decimals of it are noise.
+function fmtLevel(symbol, p) {
+  const d = srcDigits(symbol);
+  if (d == null || !(Math.abs(p) > 0) || !isFinite(p)) return fmt(p);
+  const need = Math.max(2, 5 - Math.floor(Math.log10(Math.abs(p))));
+  return fmtPx(p, Math.min(d, need));
+}
 function spreadText(symbol, q) {
   if (!q || !(q.ask > q.bid)) return "";
   const d = q.ask - q.bid;
@@ -80,7 +195,12 @@ function spreadText(symbol, q) {
     const p = d / pipSize(symbol, q.bid);
     return `spread: ${p >= 10 ? Math.round(p) : p.toFixed(1)} pips`;
   }
-  const t = fmtSpread(d);
+  // In the instrument's own decimals when the source declares them, at its
+  // prices' places (quoteScale): two significant digits of a 0.00000002
+  // spread printed "2e-8".
+  const dg = srcDigits(symbol);
+  const by = quoteScale(q);
+  const t = dg == null ? fmtSpread(d) : (Number(fmtPx(d, dg, by)) > 0 ? fmtPx(d, dg, by) : "");
   return t ? `spread: ${t}` : "";
 }
 
@@ -95,6 +215,8 @@ function spreadText(symbol, q) {
    a custom vendor's board after a source switch. */
 const priceCacheKey = () => `lset-prices-${state.provider}`;
 function loadPriceCache() {
+  state.priceTimes = {}; // only newly received source times can establish monotonicity
+  state.quotes = {};
   state.staleFromCache = new Set();
   let saved = null;
   try { saved = JSON.parse(localStorage.getItem(priceCacheKey())); } catch (e) { /* corrupt entry */ }
@@ -106,19 +228,21 @@ function loadPriceCache() {
     }
   }
   for (const [sym, q] of Object.entries(saved.quotes || {})) {
-    if (!state.quotes[sym] && q && q.ask > q.bid) state.quotes[sym] = q;
+    if (!state.quotes[sym] && q && q.ask >= q.bid) {
+      state.quotes[sym] = { ...q, ts: saved.source_times === true ? sourcePriceTime(q.ts) : null };
+    }
   }
 }
 let priceCacheSavedAt = 0;
 function savePriceCache() {
-  // Throttled to one write per 5s: the poll fires every second and ticks
+  // Throttled to one write per 5s: the board polls and ticks
   // stream constantly; serialising 4k symbols on each would be pure waste.
   const now = Date.now();
   if (now - priceCacheSavedAt < 5000) return;
   priceCacheSavedAt = now;
   try {
     localStorage.setItem(priceCacheKey(),
-      JSON.stringify({ prices: state.prices, quotes: state.quotes }));
+      JSON.stringify({ prices: state.prices, quotes: state.quotes, source_times: true }));
   } catch (e) { /* quota or private mode; the cache is best-effort */ }
 }
 
@@ -190,8 +314,292 @@ function saveShellState() {
 // objects above still back the backtest equity curve; they no longer draw the
 // price chart.
 
+/* The chart area's own word. What it says when it has no bars to draw: a
+   candle request that failed (the source's own message and a Retry), a
+   source that answered with no bars, or the next load in flight after
+   either. One opaque element over the chart (#chart-note), so nothing of the
+   previous instrument shows beneath it. Every word a source supplied is set
+   as text, never as markup. */
+const chartNoteState = { kind: "", detail: "", symbol: "", timeframe: "",
+                         source: "", watching: false };
+
+// A source's name as the page shows it elsewhere (a broker's row label, such as
+// "<Broker> (paper trading)").
+function chartSourceName(name) {
+  const p = (state.providers || []).find((x) => x.name === name);
+  return String((p && p.title) || String(name || "").replace(/^broker:/, "") || "the source");
+}
+
+// The reason a candle request failed, in the source's own words. The engine
+// leads with "candles failed: " (the note's first line already says that) and
+// a broker's connector leads with its protocol code word ("internal: ..."),
+// which is machine vocabulary (see tpbPlainReason); what is left is the
+// sentence the source wrote. A bare status code means it wrote none.
+function chartFailReason(detail) {
+  let t = String(detail == null ? "" : detail).replace(/^candles failed:\s*/, "").trim();
+  if (typeof tpbPlainReason === "function") t = tpbPlainReason(t);
+  if (/^\d{3}$/.test(t)) return `The engine answered ${t} and gave no reason.`;
+  return t || "No reason was given.";
+}
+
+// What the note reads for each state. Pure, so it can be checked on its own.
+function chartNoteText(n) {
+  const what = `${n.symbol} (${n.timeframe})`;
+  if (n.kind === "fail") {
+    return { title: `Could not load ${what} from ${n.source}`,
+             detail: chartFailReason(n.detail), retry: true };
+  }
+  if (n.kind === "empty") {
+    return { title: `${n.source} returned no candles for ${what}`,
+             detail: "", retry: true };
+  }
+  return { title: `Loading ${what}…`, detail: "", retry: false };
+}
+
+function chartNotePaint() {
+  const el = $("chart-note");
+  if (!el) return;
+  const n = chartNoteState;
+  // The multi-chart layouts draw panes that fetch their own bars; the note
+  // speaks for the single chart only, and must not cover the panes.
+  const ls = window.LSEChart && window.LSEChart.layoutStore;
+  const st = ls && ls.get ? ls.get() : null;
+  const single = !st || st.layout === "1x1";
+  el.textContent = "";
+  el.dataset.kind = n.kind;
+  el.classList.toggle("hidden", !n.kind || !single);
+  // The chart keeps controls of its own floating over its canvas (the zoom
+  // strip, the corner buttons). With no bars they act on nothing, and they
+  // stack above this note, so the mount is hidden for as long as the note is
+  // up. Hidden, not removed: it keeps its size and nothing re-measures.
+  const wrap = $("chart-wrap");
+  if (wrap) wrap.classList.toggle("noted", !!n.kind && single);
+  if (!n.kind) return;
+  const t = chartNoteText(n);
+  const line = (cls, text) => {
+    const d = document.createElement("div");
+    d.className = cls;
+    d.textContent = text;
+    el.appendChild(d);
+  };
+  line("cn-title", t.title);
+  if (t.detail) line("cn-detail", t.detail);
+  if (t.retry) {
+    const b = document.createElement("button");
+    b.id = "chart-retry";
+    b.type = "button";
+    b.textContent = "Retry";
+    b.onclick = () => loadChart();
+    el.appendChild(b);
+  }
+}
+
+// kind: "fail" (detail = what the engine answered), "empty", "loading", or
+// "" to take the note away.
+function chartNote(kind, detail) {
+  const n = chartNoteState;
+  n.kind = kind || "";
+  n.detail = detail == null ? "" : String(detail);
+  n.symbol = state.symbol;
+  n.timeframe = state.timeframe;
+  n.source = chartSourceName(state.provider);
+  const ls = window.LSEChart && window.LSEChart.layoutStore;
+  if (ls && ls.subscribe && !n.watching) {
+    n.watching = true;
+    ls.subscribe(chartNotePaint);   // follow a switch into or out of multi-chart
+  }
+  chartNotePaint();
+}
+
+// A note left by the last load (a failure, an empty answer) is about THAT
+// load. While a reload of the SAME chart is in flight (Retry, an indicator
+// added) the chart area says so instead of showing the old reason. No note,
+// nothing to say: such a reload keeps its own bars until the new ones land.
+// (Another instrument or timeframe always gets the loading note: loadChart.)
+function chartNoteLoading() {
+  if (chartNoteState.kind) chartNote("loading", "");
+}
+
+/* A broker's first page is often short. Its adapter answers within its time
+   with the newest bars it has and goes on reading older ones, so the same
+   request a few seconds later returns more. For a broker source only, a page
+   shorter than the one asked for is asked for again about 8 s and about 25 s
+   after it was drawn, while the count keeps growing: at most those two
+   re-asks per chart load, and none once a re-ask brings no more than before.
+
+   What the user is looking at must not move. A chart nobody has touched is
+   still following its newest bar, and redrawing it with older bars in front
+   keeps its zoom and keeps those newest bars where they are. A chart the
+   user has moved or zoomed holds its place by bar NUMBER, and this build of
+   the chart cannot be told that bars were added in front of it: a redraw
+   would throw the view back by exactly that many bars. So for a chart that
+   has been touched (a drag, a wheel, a drawing begun) the longer page is
+   held, a small button says how many older bars have arrived, and pressing
+   it draws them, with the view back on the newest bars. */
+const CHART_REASK_MS = [8000, 25000];
+const chartGrow = { timer: null, held: null, shown: 0, touched: false,
+                    series: "", listening: false, watching: false };
+
+function chartGrowTouched() { chartGrow.touched = true; }
+
+// The button, as the state says: only while a longer page is held, and only
+// over the single chart (the multi-chart panes are not this chart).
+function chartGrowPaint() {
+  const el = $("chart-more");
+  if (!el) return;
+  const more = chartGrow.held ? chartGrow.held.candles.length - chartGrow.shown : 0;
+  const ls = window.LSEChart && window.LSEChart.layoutStore;
+  const st = ls && ls.get ? ls.get() : null;
+  const show = more > 0 && (!st || st.layout === "1x1");
+  el.classList.toggle("hidden", !show);
+  if (!show) return;
+  el.textContent = `${more.toLocaleString("en-US")} older bar${more === 1 ? " has" : "s have"} arrived · Show`;
+  el.title = "Draws them, with the chart back on its newest bars. " +
+    "They were not drawn by themselves because you have moved or zoomed the chart.";
+  el.onclick = chartGrowShow;
+}
+
+// Draw a page the venue sent for the chart on screen, in place of the
+// shorter one. Same shape as loadChart's own (which stays self-contained).
+function chartGrowApply(data) {
+  // The bar the stream is forming (onTick) is newer than every closed bar a
+  // venue sends: keep it, or each re-ask would wipe the live bar and start it
+  // again from the next tick. A page that ends with that same bar still
+  // forming (the engine builds it from the venue's closed minutes) gives its
+  // open; the stream's latest price in it stays its close, so the price never
+  // steps back to the last closed minute's. Once that bar is closed, the
+  // venue's own wins.
+  const forming = state.lastBar;
+  state.candleData = (data.candles || []).map(([t, o, h, l, c, v]) =>
+    ({ time: t, open: o, high: h, low: l, close: c, volume: v }));
+  chartGrow.shown = state.candleData.length;
+  const last = state.candleData[state.candleData.length - 1];
+  if (forming && last && forming.time > last.time) state.candleData.push(forming);
+  else if (forming && last && forming.time === last.time
+           && Date.now() / 1000 < last.time + (TF_SECONDS[state.timeframe] || 3600)) {
+    const px = state.prices[state.symbol];
+    const ticked = px != null && (state.priceTimes[state.symbol] || 0) >= last.time * 1000;
+    state.candleData[state.candleData.length - 1] = { ...last,
+      close: ticked ? px : last.close,
+      high: Math.max(last.high, forming.high, ticked ? px : -Infinity),
+      low: Math.min(last.low, forming.low, ticked ? px : Infinity) };
+  }
+  state.engineIndicators = data.indicators || {};
+  state.lastBar = state.candleData[state.candleData.length - 1] || null;
+  chartGrow.held = null;
+  pushToChart();
+  chartGrowPaint();
+}
+
+// The button: draw the held page. The chart is mounted afresh, the way
+// applying a saved layout does, so it comes back following its newest bars
+// instead of sitting that many bars in the past.
+function chartGrowShow() {
+  const data = chartGrow.held;
+  if (!data) return;
+  if (state.chartMounted && window.LSEChart && window.LSEChart.unmount) {
+    window.LSEChart.unmount();
+    state.chartMounted = false;
+  }
+  chartGrow.touched = false;
+  chartGrowApply(data);
+}
+
+// A chart load starts: whatever the last one was waiting for is over. The
+// "touched" mark belongs to an instrument at a timeframe, which is exactly
+// when the chart goes back to following its newest bar by itself.
+function chartGrowStop() {
+  clearTimeout(chartGrow.timer);
+  chartGrow.timer = null;
+  chartGrow.held = null;
+  const series = `${state.symbol}|${state.timeframe}`;
+  if (series !== chartGrow.series) {
+    chartGrow.series = series;
+    chartGrow.touched = false;
+  }
+  chartGrowPaint();
+}
+
+// A load's bars are drawn: `got` of the `asked` the request named. seq and
+// want are that load's own; url is its request, asked again unchanged.
+function chartGrowWatch(seq, want, url, asked, got) {
+  const host = $("chart-pro");
+  if (host && host.addEventListener && !chartGrow.listening) {
+    chartGrow.listening = true;
+    for (const ev of ["pointerdown", "wheel", "touchstart"]) {
+      host.addEventListener(ev, chartGrowTouched, { capture: true, passive: true });
+    }
+  }
+  const ls = window.LSEChart && window.LSEChart.layoutStore;
+  if (ls && ls.subscribe && !chartGrow.watching) {
+    chartGrow.watching = true;
+    ls.subscribe(chartGrowPaint);
+  }
+  // One wait at a time: a watch never runs beside an earlier one.
+  clearTimeout(chartGrow.timer);
+  chartGrow.timer = null;
+  chartGrow.held = null;
+  chartGrow.shown = got;
+  chartGrowPaint();
+  if (!isBrokerSource(state.provider) || got >= asked) return;
+  const drawnAt = Date.now();
+  const again = (n, had) => {
+    chartGrow.timer = setTimeout(async () => {
+      chartGrow.timer = null;
+      // Another instrument, timeframe or source, or a reload: not this chart.
+      if (seq !== state.loadSeq || state.candleKey !== want) return;
+      let data = null;
+      try {
+        const res = await fetch(url);
+        if (res.ok) data = await res.json();
+      } catch (e) { data = null; }
+      if (seq !== state.loadSeq || state.candleKey !== want) return;
+      const now = data && Array.isArray(data.candles) ? data.candles.length : 0;
+      // No more than before (or no answer): the venue has sent what it has.
+      if (now <= had) return;
+      if (chartGrow.touched) {
+        chartGrow.held = data;
+        chartGrowPaint();
+      } else {
+        chartGrowApply(data);
+      }
+      if (n + 1 < CHART_REASK_MS.length && now < asked) again(n + 1, now);
+    }, Math.max(0, drawnAt + CHART_REASK_MS[n] - Date.now()));
+  };
+  again(0, got);
+}
+
+// The decimals the active source declares for its instruments (a broker's
+// catalog, loadInstruments), for the chart's axis, OHLC line, price tag and
+// position labels, whose formatter otherwise guesses from a symbol's
+// spelling (a pair spelt EUR_USD printed as a share, to two places). The
+// whole map, once each time it changes; null when the chart has it already.
+// Sent with the source they came from (`priceSource`, chartDigitsSource):
+// the chart keeps them by source, so a chart of another source never prints
+// with them.
+function chartDigitsPayload() {
+  if (state.chartDigitsVer === state.digitsVer) return null;
+  state.chartDigitsVer = state.digitsVer;
+  return { ...(state.digitsBySym || {}) };
+}
+
+function chartDigitsSource() {
+  return state.digitsSource || state.provider;
+}
+
+// The same, sent on its own: the instruments can land after the bars.
+function chartPushDigits() {
+  if (!window.LSEChart || !state.chartMounted) return;
+  const digits = chartDigitsPayload();
+  if (digits) window.LSEChart.update({ priceDigits: digits, priceSource: chartDigitsSource() });
+}
+
 function pushToChart() {
   if (!window.LSEChart || !state.candleData) return;
+  // Bars that arrive by another road end a failure note: the tick tape
+  // builds from live trades even after its history request failed.
+  if (state.candleData.length && chartNoteState.kind
+      && chartNoteState.kind !== "loading") chartNote("", "");
   const payload = {
     provider: state.provider,
     symbol: state.symbol,
@@ -202,6 +610,11 @@ function pushToChart() {
     engineIndicators: state.engineIndicators || {},
     quote: state.quotes[state.symbol] || null,
   };
+  const digits = chartDigitsPayload();
+  if (digits) {
+    payload.priceDigits = digits;
+    payload.priceSource = chartDigitsSource();
+  }
   if (!state.chartMounted) {
     window.LSEChart.mount($("chart-pro"), payload);
     state.chartMounted = true;
@@ -232,10 +645,26 @@ function updateWindowTitle() {
   // same source as the sidebar labels.
   const shown = activeGridSymbol() || state.symbol;
   if (!shown) return;   // pre-login / pre-instrument state: keep the app name
-  const inst = state.instruments.find((i) => i.symbol === shown);
+  const inst = catalogInstrument(shown);
   document.title = `${shown}${inst && inst.name ? " · " + inst.name : ""} ${state.timeframe} · LSE Terminal`;
   // The assistant's hero names the charted symbol + timeframe too.
   aiPanelRefreshEmpty();
+}
+
+function recoverUnavailableSymbol(detail) {
+  // Only a confirmed missing-history response retires a saved selection.
+  // Aliases absent from today's live catalogue still work through the API.
+  if (state.provider !== "lse" || !/\[404\].*has no candle data/i.test(String(detail))) return false;
+  const old = state.symbol;
+  const fallback = state.instruments.find((item) => item.symbol !== old);
+  if (!fallback) return false;
+  state.symbol = fallback.symbol;
+  state.watchlists.lse = (state.watchlists.lse || []).filter((symbol) => symbol !== old);
+  saveShellState();
+  renderWatchlist();
+  if (typeof tpbFollowChart === "function") tpbFollowChart(state.symbol);
+  connectStream();
+  return true;
 }
 
 async function loadChart() {
@@ -244,6 +673,8 @@ async function loadChart() {
   // order, and a slow older response landing last would paint the previous
   // instrument's candles under the new title. Only the newest load may win.
   const seq = (state.loadSeq = (state.loadSeq || 0) + 1);
+  // What this load is for, to compare with what the bars in hand are of.
+  const want = `${state.provider}|${state.symbol}|${state.timeframe}`;
   updateWindowTitle();
   // trade ticket header follows the symbol immediately, not on the next tick
   if (typeof tpxUpdateQuote === "function") try { tpxUpdateQuote(); } catch (e) { /* panel absent */ }
@@ -251,17 +682,65 @@ async function loadChart() {
   // futures universe has order-by-order data)
   if (typeof l3SyncButton === "function") try { l3SyncButton(); } catch (e) { /* rail absent */ }
   status(`loading ${state.symbol}…`);
+  // Whatever the last load was still waiting for (a re-ask of a short page,
+  // bars held behind the button) is over.
+  if (typeof chartGrowStop === "function") chartGrowStop();
+  if (state.candleKey !== want) {
+    // Another instrument, timeframe or source. A broker can take seconds to
+    // answer, and for those seconds the ticket, the dock and the title were
+    // on the NEW instrument over the OLD one's candles and prices. The old
+    // bars leave at once, and with them what the tick handler builds on
+    // (state.lastBar), so no tick of the new instrument is drawn onto the old
+    // one's last bar; the chart area says what is loading until it is drawn.
+    state.candleData = [];
+    state.engineIndicators = {};
+    state.lastBar = null;
+    state.candleKey = "";
+    // Only a chart that is up has bars to take off. (Mounting it here, empty,
+    // would put its first render ahead of the load that used to start it.)
+    if (state.chartMounted) pushToChart();
+    if (typeof chartNote === "function") chartNote("loading", "");
+  } else if (typeof chartNoteLoading === "function") {
+    // The same chart again (Retry, an indicator added): its bars are right
+    // and stay. A note the last load left is about that load.
+    chartNoteLoading();
+  }
   // 5000 = the engine's per-request cap: open with one full page of history
   // so deep scrollback starts loaded instead of paging immediately.
   const url = `/api/candles?provider=${encodeURIComponent(state.provider)}` +
     `&symbol=${encodeURIComponent(state.symbol)}&timeframe=${state.timeframe}` +
     `&limit=5000&indicators=${encodeURIComponent(indicatorQuery())}`;
-  const res = await fetch(url);
+  // A fetch that throws (the engine is not answering) is a failed load like
+  // any other. Uncaught, it left "loading X…" in the header for good.
+  let res = null, down = "";
+  try { res = await fetch(url); } catch (e) { down = String((e && e.message) || e); }
   if (seq !== state.loadSeq) return; // superseded while in flight
-  if (!res.ok) {
-    let detail = res.status;
-    try { detail = (await res.json()).detail || detail; } catch (e) { /* keep status */ }
-    if (seq === state.loadSeq) status(`error: ${detail}`);
+  if (!res || !res.ok) {
+    let detail = res ? res.status : `the Terminal's engine did not answer (${down})`;
+    if (res) try { detail = (await res.json()).detail || detail; } catch (e) { /* keep status */ }
+    if (seq !== state.loadSeq) return; // a delayed failure cannot replace a newer selection
+    if (recoverUnavailableSymbol(detail)) return loadChart();
+    if (seq === state.loadSeq) {
+      status(`error: ${detail}`);
+      // One failure is not the source's: the engine answers 400 when an
+      // INDICATOR could not be computed over bars the source did return. If
+      // the bars in hand are this very chart's (an indicator was just added
+      // or edited), they are still right and stay; the header says why.
+      if (res && res.status === 400 && state.candleKey === want) return;
+      // Otherwise the bars in hand belong to whatever loaded last: another
+      // instrument, or this one before the source failed. They leave the
+      // screen, and the tick path with them: onTick builds on state.lastBar,
+      // so left in place the next tick of the NEW symbol was drawn onto the
+      // OLD symbol's last bar.
+      state.candleData = [];
+      state.engineIndicators = {};
+      state.lastBar = null;
+      state.candleKey = "";
+      pushToChart();
+      // And the chart area says why, in the source's words, with a Retry:
+      // one line in the header over a blank chart told nobody what to do.
+      if (typeof chartNote === "function") chartNote("fail", detail);
+    }
     return;
   }
   const data = await res.json();
@@ -269,17 +748,30 @@ async function loadChart() {
 
   // Volume is carried on the candle now: the pro engine renders its own volume
   // pane from this field, where the classic view uses a separate series.
-  state.candleData = data.candles.map(([t, o, h, l, c, v]) =>
+  state.candleData = (data.candles || []).map(([t, o, h, l, c, v]) =>
     ({ time: t, open: o, high: h, low: l, close: c, volume: v }));
   // Python-computed indicators (built-ins and the user's own) ride along and
   // are drawn by the chart as precomputed series.
   state.engineIndicators = data.indicators || {};
+  state.candleKey = want;
   pushToChart();
   state.lastBar = state.candleData[state.candleData.length - 1] || null;
+  // However many bars came back is what the source has now. A page shorter
+  // than the 5000 asked for is an honest answer and is drawn as it is. Only
+  // NO bars at all gets a word in the chart area, and not on the tick tape,
+  // which starts empty on a quiet symbol by design.
+  if (typeof chartNote === "function") {
+    chartNote(!state.candleData.length && state.timeframe !== "tick" ? "empty" : "", "");
+  }
+  // A broker may still be reading older bars: its short page is asked for
+  // again, twice at most (chartGrowWatch). No other source is asked again.
+  if (typeof chartGrowWatch === "function") {
+    chartGrowWatch(seq, want, url, 5000, state.candleData.length);
+  }
   // No symbol/timeframe readout in the chrome: the window title stays plain
   // "LSE Terminal" and the topline status only carries transient loading and
   // error messages (classic pro-terminal quiet top bar).
-  status("");
+  status(state.provider === "lse" && state.timeframe === "tick" ? "Live ticks · history starts when connected" : "");
 }
 
 /* ---------- live stream + price board poll ---------- */
@@ -287,8 +779,8 @@ async function loadChart() {
 /* Division of labor (replaced the viewport-rotation websocket):
    the WEBSOCKET streams ONLY the charted symbol (it needs tick-level updates
    to build the live candle and the trade ticket's quote). The WATCHLIST is
-   fed by a 1s poll of the platform price board (/api/prices -> data-api
-   /v1/prices -> x_live_prices, ~50ms fresh), so every visible row prices on
+   fed by a budgeted 3s poll of the platform price board (/api/prices -> data-api
+   /v1/prices -> latest ticks), so every visible row prices on
    the next poll no matter how many pairs are open; no per-row stream slots,
    no 16-symbol plan-cap fight. */
 function visibleWatchSymbols() {
@@ -307,24 +799,42 @@ function visibleWatchSymbols() {
   return out;
 }
 
+// Store source time in milliseconds for quote-age consumers. Old local cache
+// timestamps are untrusted: previous releases stamped receipt time there.
+function sourcePriceTime(value) {
+  if (typeof value === "number") return Number.isFinite(value) && value > 0
+    ? (value < 1e12 ? value * 1000 : value) : null;
+  if (typeof value !== "string" || !value.trim()) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) && ms > 0 ? ms : null;
+}
+function acceptPriceTime(symbol, time) {
+  const previous = state.priceTimes[symbol];
+  if (previous != null && (time == null || time < previous)) return false;
+  if (time != null) state.priceTimes[symbol] = time;
+  return true;
+}
+
 /* Paint one board row into the watchlist. Skips the charted symbol: its
    websocket ticks are fresher and repainting a 1s-old poll price over them
    would make the row flicker backwards. */
 function paintBoardPrice(r) {
   if (!r || r.price == null || r.symbol === state.symbol) return;
+  const time = sourcePriceTime(r.ts);
+  if (!acceptPriceTime(r.symbol, time)) return;
   const prev = state.prices[r.symbol];
   state.prices[r.symbol] = r.price;
-  if (r.bid != null && r.ask != null && r.ask > r.bid) {
+  if (r.bid != null && r.ask != null && r.ask >= r.bid) {
     // Stamped: a quote for a closed market can be hours old, and the agent
     // states it as current unless the age travels with it (a blind read
     // could only say "as old as this turn").
-    state.quotes[r.symbol] = { bid: r.bid, ask: r.ask, ts: Date.now() };
-  }
+    state.quotes[r.symbol] = { bid: r.bid, ask: r.ask, ts: time };
+  } else delete state.quotes[r.symbol];
   if (state.staleFromCache) state.staleFromCache.delete(r.symbol);
   // Every row of that symbol: a starred instrument sits in WATCHLIST and in
   // its own folder at once, and both must read the same price.
   for (const cell of document.querySelectorAll(`.wrow[data-symbol="${CSS.escape(r.symbol)}"] .wprice`)) {
-    cell.textContent = fmt(r.price);
+    cell.textContent = fmtQuote(r.symbol, r.price);
     cell.classList.remove("stale"); // live now; drop the cached-price dimming
     cell.classList.toggle("up", prev !== undefined && r.price >= prev);
     cell.classList.toggle("down", prev !== undefined && r.price < prev);
@@ -334,20 +844,256 @@ function paintBoardPrice(r) {
   }
 }
 
-let pricePollBusy = false;
+const PRICE_POLL_INTERVAL_MS = 3000;
+let pricePollBusy = false, pricePollNextAt = 0, pricePollTimer = null;
+let pricePollProvider = state.provider, pricePollKeyGeneration = 0;
+const pricePollBudgets = new Map();
+function syncPricePollBudget() {
+  if (pricePollProvider === state.provider) return;
+  pricePollBudgets.set(pricePollProvider, { nextAt: pricePollNextAt, error: pricePollError });
+  if (pricePollTimer !== null) { clearTimeout(pricePollTimer); pricePollTimer = null; }
+  pricePollProvider = state.provider;
+  const budget = pricePollBudgets.get(pricePollProvider);
+  pricePollNextAt = budget ? budget.nextAt : 0;
+  setPricePollError(budget ? budget.error : "");
+}
+function resetPricePollKey() {
+  pricePollKeyGeneration++;
+  pricePollBudgets.delete("lse");
+  if (pricePollProvider === "lse") {
+    pricePollNextAt = 0; setPricePollError("");
+    if (pricePollTimer !== null) { clearTimeout(pricePollTimer); pricePollTimer = null; }
+  }
+}
+
+/* One price budget for the whole terminal, however many windows are open
+   and whoever asks. The plan counts calls to the price board per key, not
+   per window: a second window with a watchlist, the rail's QUOTES card and
+   a dashboard widget would each have added their own calls on top of the
+   watchlist's 20 a minute (the demo broker's adapter takes 30 of a free
+   key's 60). So there is one gate per source, kept where every window of
+   this terminal reads it, and one call at a time behind it:
+   - the gate is the time before which no window asks that source again
+     (three seconds after the last call; a 429's wait when the board says so);
+   - the window that asks carries what the others want (told over a
+     BroadcastChannel when they find the gate closed) and what widgets asked
+     for, in the same call, and passes the rows on, so every window is
+     priced by one call, not one each;
+   - a Web Lock keeps two windows from asking in the same instant.
+   A browser without these (and the tests' bare context) is one window with
+   its own budget, as before. */
+const PRICE_GATE_KEY = "lset-price-gate:";
+const PRICE_WANT_MS = 10000;      // how long a told or asked symbol stays wanted
+const PRICE_FRESH_MS = 5000;      // a row this new answers a widget without a call
+function priceGateWait(provider) {
+  try {
+    if (typeof localStorage === "undefined") return 0;
+    const wait = (Number(localStorage.getItem(PRICE_GATE_KEY + provider)) || 0) - Date.now();
+    // further off than the longest back-off (120 s) is a changed clock, not a wait
+    return wait > 0 && wait <= 125000 ? wait : 0;
+  } catch (e) { return 0; }
+}
+function priceGateSet(provider, ms) {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(PRICE_GATE_KEY + provider, String(Date.now() + ms));
+    }
+  } catch (e) { /* storage disabled: this window's own budget still holds */ }
+}
+
+// want: source -> Map(symbol -> wanted until), asked by a widget here or
+// told by another window. rows: "source\nsymbol" -> {row, at}.
+const priceDesk = { want: new Map(), rows: new Map(), waiting: [], chan: null, pump: null };
+function priceDeskWant(provider, symbols, ms) {
+  let m = priceDesk.want.get(provider);
+  if (!m) { m = new Map(); priceDesk.want.set(provider, m); }
+  const until = Date.now() + (ms || PRICE_WANT_MS);
+  for (const s of symbols) if (s && typeof s === "string") m.set(s, until);
+}
+function priceDeskWanted(provider) {
+  const m = priceDesk.want.get(provider);
+  if (!m) return [];
+  const now = Date.now();
+  for (const [s, until] of m) if (until < now) m.delete(s);
+  return [...m.keys()];
+}
+function priceDeskChannel() {
+  if (priceDesk.chan !== null) return priceDesk.chan;
+  priceDesk.chan = false;
+  try {
+    if (typeof BroadcastChannel === "undefined") return false;
+    const ch = new BroadcastChannel("lset-prices");
+    ch.onmessage = (m) => {
+      const d = m && m.data;
+      if (!d || typeof d.provider !== "string") return;
+      if (d.t === "want" && Array.isArray(d.symbols)) {
+        priceDeskWant(d.provider, d.symbols.slice(0, 50));
+      } else if (d.t === "rows" && Array.isArray(d.rows)) {
+        // another window asked: its rows price this window too
+        if (d.provider === state.provider) {
+          for (const row of d.rows) paintBoardPrice(row);
+        }
+        priceDeskFeed(d.provider, d.rows, true);
+      }
+    };
+    priceDesk.chan = ch;
+  } catch (e) { /* no channel: each window keeps to the shared gate alone */ }
+  return priceDesk.chan;
+}
+function priceDeskTell(provider, symbols) {
+  const ch = priceDeskChannel();
+  if (ch && symbols.length) {
+    try { ch.postMessage({ t: "want", provider, symbols: symbols.slice(0, 50) }); } catch (e) {}
+  }
+}
+function priceDeskFeed(provider, rows, fromOtherWindow) {
+  const now = Date.now();
+  for (const row of rows) {
+    if (row && typeof row.symbol === "string") {
+      priceDesk.rows.set(provider + "\n" + row.symbol, { row, at: now });
+    }
+  }
+  if (!fromOtherWindow) {
+    const ch = priceDeskChannel();
+    if (ch) { try { ch.postMessage({ t: "rows", provider, rows }); } catch (e) {} }
+  }
+  // whoever waits on this source looks again (the board answers only the
+  // symbols it has, so a waiter is released by the call, not by its rows)
+  const waiting = priceDesk.waiting;
+  priceDesk.waiting = [];
+  for (const w of waiting) {
+    if (w.provider === provider) w.done(); else priceDesk.waiting.push(w);
+  }
+}
+
+/* Prices for symbols outside the watchlist (a dashboard widget, the rail's
+   QUOTES card): answered from the last call when it is fresh, otherwise
+   added to the next call any window makes and waited for. Never a call of
+   its own outside the gate. Resolves to the rows the board has (a symbol
+   it does not know is simply absent), or null when no call got through. */
+async function priceDeskPrices(provider, symbols, maxAgeMs) {
+  const want = [...new Set(symbols.filter((s) => s && typeof s === "string"))].slice(0, 50);
+  if (!want.length) return [];
+  const age = maxAgeMs == null ? PRICE_FRESH_MS : maxAgeMs;
+  const have = () => want.map((s) => priceDesk.rows.get(provider + "\n" + s));
+  const fresh = () => have().every((e) => e && Date.now() - e.at <= age);
+  let fed = fresh();
+  if (!fed) {
+    priceDeskWant(provider, want);
+    priceDeskTell(provider, want);
+    priceDeskPump(provider);
+    fed = await new Promise((resolve) => {
+      const w = { provider, done: () => { clearTimeout(t); resolve(true); } };
+      const t = setTimeout(() => {
+        priceDesk.waiting = priceDesk.waiting.filter((x) => x !== w);
+        resolve(false);
+      }, 15000);
+      priceDesk.waiting.push(w);
+    });
+  }
+  const rows = have().filter(Boolean).map((e) => e.row);
+  return fed || rows.length ? rows : null;
+}
+
+/* The call itself: one source, the symbols given, behind the shared gate
+   and the lock. Answers {rows} on success, {status, retry} when the board
+   refused, null when another window is asking this moment or the gate
+   closed meanwhile (its rows arrive over the channel). */
+async function priceBoardAsk(provider, symbols) {
+  const ask = async () => {
+    priceGateSet(provider, PRICE_POLL_INTERVAL_MS);
+    const res = await fetch(`/api/prices?provider=${encodeURIComponent(provider)}` +
+      `&symbols=${encodeURIComponent(symbols.slice(0, 50).join(","))}`);
+    const body = await res.json(); // consume errors as well as successful rows
+    if (!res.ok) {
+      let retry = 0;
+      if (res.status === 429) {
+        retry = Math.max(3, Math.min(120, Number(res.headers.get("Retry-After")) || 60));
+        priceGateSet(provider, retry * 1000); // every window waits it out
+      }
+      return { status: res.status, retry };
+    }
+    return { rows: Array.isArray(body) ? body : [] };
+  };
+  const locks = typeof navigator !== "undefined" && navigator.locks;
+  if (!locks || !locks.request) return ask();
+  return locks.request("lset-price-poll:" + provider, { ifAvailable: true }, async (lock) => {
+    if (!lock || priceGateWait(provider) > 0) return null;
+    return ask();
+  });
+}
+
+/* Asked symbols that no watchlist poll of this window will carry (the
+   watchlist is off screen, or shows another source): the desk asks for
+   them itself, at the gate, until nobody wants them. */
+function priceDeskPump(provider) {
+  if (priceDesk.pump !== null) return;
+  const tick = async () => {
+    priceDesk.pump = null;
+    const want = priceDeskWanted(provider);
+    if (!want.length) return;
+    const carried = provider === state.provider && !document.hidden &&
+      visibleWatchSymbols().some((s) => s !== state.symbol);
+    const wait = priceGateWait(provider);
+    if (!carried && !pricePollBusy && wait <= 0) {
+      try {
+        const out = await priceBoardAsk(provider, want);
+        if (out && out.rows) priceDeskFeed(provider, out.rows, false);
+      } catch (e) { /* the next tick asks again */ }
+    }
+    if (priceDeskWanted(provider).length && priceDesk.pump === null) {
+      priceDesk.pump = setTimeout(tick, Math.max(500, priceGateWait(provider)));
+    }
+  };
+  priceDesk.pump = setTimeout(tick, 0);
+}
+
 async function pollPrices() {
-  if (document.hidden || pricePollBusy) return; // no cost when minimised
+  syncPricePollBudget();
+  if (document.hidden || pricePollBusy) return;
+  const shared = priceGateWait(state.provider);
+  const wait = Math.max(pricePollNextAt - performance.now(), shared);
+  if (wait > 0) {
+    // Another window asked last: tell it what this one shows, so its next
+    // call prices these rows too.
+    if (shared > 0) {
+      priceDeskTell(state.provider, visibleWatchSymbols().filter((s) => s !== state.symbol));
+    }
+    // Render/scroll primes and the interval share one trailing attempt.
+    if (pricePollTimer === null) pricePollTimer = setTimeout(() => {
+      pricePollTimer = null; pollPrices();
+    }, wait);
+    return;
+  }
   const syms = visibleWatchSymbols().filter((s) => s !== state.symbol);
   if (!syms.length) return;
-  pricePollBusy = true; // a slow response must not stack requests
+  if (pricePollTimer !== null) { clearTimeout(pricePollTimer); pricePollTimer = null; }
+  pricePollBusy = true;
+  pricePollNextAt = performance.now() + PRICE_POLL_INTERVAL_MS;
+  const provider = state.provider, prices = state.prices, keyGeneration = pricePollKeyGeneration;
+  const current = () => state.provider === provider && state.prices === prices &&
+    (provider !== "lse" || pricePollKeyGeneration === keyGeneration);
+  const showError = (message) => {
+    if (!current()) return;
+    setPricePollError(message);
+  };
   try {
-    const res = await fetch(`/api/prices?provider=${encodeURIComponent(state.provider)}` +
-      `&symbols=${encodeURIComponent(syms.slice(0, 50).join(","))}`);
-    if (res.ok) {
-      for (const row of await res.json()) paintBoardPrice(row);
-      savePriceCache(); // freshest board just painted; next launch starts here
+    // This window's rows first; then what widgets and other windows asked for.
+    const asked = [...new Set([...syms, ...priceDeskWanted(provider)])];
+    const out = await priceBoardAsk(provider, asked);
+    if (!out || !current()) return;
+    if (!out.rows) {
+      if (out.status === 429) {
+        pricePollNextAt = performance.now() + out.retry * 1000;
+        showError(`Watchlist price limit reached; retrying in ${out.retry}s`);
+      } else showError("Watchlist prices unavailable; retrying");
+      return;
     }
-  } catch (e) { /* transient network error; next poll retries */ }
+    for (const row of out.rows) paintBoardPrice(row);
+    priceDeskFeed(provider, out.rows, false);
+    savePriceCache();
+    setPricePollError("");
+  } catch (e) { showError("Watchlist prices unavailable; retrying"); }
   finally { pricePollBusy = false; }
 }
 
@@ -374,27 +1120,29 @@ function connectStream() {
 }
 
 function onTick(t) {
+  const time = sourcePriceTime(t.ts);
+  if (!acceptPriceTime(t.symbol, time)) return;
   const prev = state.prices[t.symbol];
   state.prices[t.symbol] = t.price;
   if (state.staleFromCache) state.staleFromCache.delete(t.symbol);
-  savePriceCache(); // throttled inside; keeps the charted symbol fresh too
   // Bid/ask ride every tick when the provider has them (real, or inferred
   // for quote-less LSE classes); the chart draws them as MT5-style lines.
-  if (t.bid != null && t.ask != null && t.ask > t.bid) {
-    state.quotes[t.symbol] = { bid: t.bid, ask: t.ask, ts: Date.now(),
+  if (t.bid != null && t.ask != null && t.ask >= t.bid) {
+    state.quotes[t.symbol] = { bid: t.bid, ask: t.ask, ts: time,
                                synthetic: !!t.quote_synthetic };
     state.pipDec = state.pipDec || {};
     state.pipDec[t.symbol] = Math.max(state.pipDec[t.symbol] || 0, decOf(t.price), decOf(t.ask));
     // live ticket prices (trade panel defines this later in the file; function
     // declarations hoist, and ticks only flow long after load)
     if (t.symbol === state.symbol && typeof tpxUpdateQuote === "function") tpxUpdateQuote();
-  }
+  } else delete state.quotes[t.symbol];
+  savePriceCache(); // persist price, quote and source time from this same row
   // (No tick fan-out to the multi-grid panes from here: the
   // TerminalMultiGrid panes fetch their own tails every 10s, so there is
   // nothing for the shell to fan.)
   // All rows of the symbol (WATCHLIST + its folder), same as paintBoardPrice.
   for (const cell of document.querySelectorAll(`.wrow[data-symbol="${CSS.escape(t.symbol)}"] .wprice`)) {
-    cell.textContent = fmt(t.price);
+    cell.textContent = fmtQuote(t.symbol, t.price);
     cell.classList.remove("stale");
     cell.classList.toggle("up", prev !== undefined && t.price >= prev);
     cell.classList.toggle("down", prev !== undefined && t.price < prev);
@@ -411,6 +1159,7 @@ function onTick(t) {
     // the same shape (o=h=l=c=price), so the tape stays visually continuous.
     const bar = { time: Math.floor(t.ts || Date.now() / 1000),
                   open: t.price, high: t.price, low: t.price, close: t.price };
+    if (state.lastBar && bar.time < state.lastBar.time) return;
     state.candleData.push(bar);
     if (state.candleData.length > TICK_MAX_BARS) {
       state.candleData = state.candleData.slice(-TICK_MAX_BARS);
@@ -424,6 +1173,8 @@ function onTick(t) {
   const step = TF_SECONDS[state.timeframe] || 3600;
   const bucket = Math.floor((t.ts || Date.now() / 1000) / step) * step;
   let bar = state.lastBar;
+  // A cached last quote can predate the loaded candle tail.
+  if (bucket < bar.time) return;
   if (bucket > bar.time) {
     bar = { time: bucket, open: t.price, high: t.price, low: t.price, close: t.price };
     state.candleData.push(bar);
@@ -645,6 +1396,54 @@ function wlToggleFav(sym) {
   renderWatchlist();
 }
 
+/* Text from a data source, made safe to place inside markup. A connected
+   broker's catalog is third-party text arriving over a pipe (and with "add
+   your own broker" it is text from an adapter anyone may have written), so a
+   symbol or an instrument name is never allowed to be parsed as HTML: an
+   instrument named `<img onerror=...>` must show as those characters. Every
+   template below that prints a source's symbol, name or category goes through
+   this, or through textContent. */
+function escHtml(s) {
+  return String(s ?? "").replace(/[&<>"']/g,
+    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+/* One sidebar row as markup. `ins` is the instrument as the source sent it;
+   `o` carries what the caller worked out (logo address, monogram, price and
+   spread text, the row's flags). Nothing from `ins` reaches the string
+   unescaped. */
+function wlRowHtml(ins, o) {
+  const sym = escHtml(ins.symbol);
+  const name = escHtml(ins.name);
+  return `<span class="wlogo">` +
+    (o.logo ? `<img src="${escHtml(o.logo)}" alt="" loading="lazy" onerror="this.remove()">` : "") +
+    `<span class="winit">${escHtml(o.initial)}</span></span>` +
+    `<span class="wsym" title="${name || sym}">${sym}` +
+    (ins.name ? `<span class="wname">${name}</span>` : "") +
+    `</span>` +
+    (o.hist
+      ? `<span class="wpricecol"><span class="whist" ` +
+        `title="Historical dataset: chartable, but no live feed">history</span></span>`
+      : `<span class="wpricecol">` +
+        `<span class="wprice${o.stale ? " stale" : ""}">${escHtml(o.price)}</span>` +
+        `<span class="wspread">${escHtml(o.spread)}</span>` +
+        `</span>`) +
+    `<button class="wstar${o.fav ? " on" : ""}" title="${o.fav ? "Remove from watchlist" : "Add to watchlist"}">` +
+    `${o.fav ? "&#9733;" : "&#9734;"}</button>`;
+}
+
+/* What the sidebar says when it holds only part of a source's catalog. The
+   sidebar asks for a bounded page (5,000 rows); a venue with 13,575
+   instruments used to show the first 5,000 after sorting and nothing to say
+   the rest existed. `total` is the source's own count when it sent one, else
+   0, in which case a page that came back exactly full is called what it is. */
+function wlCutNote(shown, total, limit) {
+  const n = (x) => Number(x).toLocaleString("en-US");
+  if (total > shown) return `showing ${n(shown)} of ${n(total)}; search for the rest`;
+  if (!total && limit && shown >= limit) return `showing the first ${n(shown)}; search for the rest`;
+  return "";
+}
+
 function renderWatchlist() {
   renderConnBar();
   const el = $("watchlist");
@@ -713,39 +1512,31 @@ function renderWatchlist() {
     const hist = ins.live === false;
     if (hist) row.dataset.live = "0";
     const lg = state.logos[ins.symbol];
-    const lsrc = lg ? String(dark ? lg.dark : lg.light).replace(/"/g, "&quot;") : "";
     // A cache-seeded price renders dimmed until the first live update
     // (paintBoardPrice/onTick strip the class); no cache and no price
     // keeps the old dash.
     const stale = state.staleFromCache && state.staleFromCache.has(ins.symbol);
     const fav = wlIsFav(ins.symbol);
-    row.innerHTML =
-      `<span class="wlogo">` +
-      (lsrc ? `<img src="${lsrc}" alt="" loading="lazy" onerror="this.remove()">` : "") +
-      `<span class="winit">${logoInitial(ins)}</span></span>` +
-      `<span class="wsym" title="${ins.name || ins.symbol}">${ins.symbol}` +
-      (ins.name ? `<span class="wname">${ins.name}</span>` : "") +
-      `</span>` +
-      (hist
-        ? `<span class="wpricecol"><span class="whist" ` +
-          `title="Historical dataset: chartable, but no live feed">history</span></span>`
-        : `<span class="wpricecol">` +
-          `<span class="wprice${stale ? " stale" : ""}">${state.prices[ins.symbol] ? fmt(state.prices[ins.symbol]) : "–"}</span>` +
-          `<span class="wspread">${spreadText(ins.symbol, state.quotes[ins.symbol])}</span>` +
-          `</span>`) +
-      `<button class="wstar${fav ? " on" : ""}" title="${fav ? "Remove from watchlist" : "Add to watchlist"}">` +
-      `${fav ? "&#9733;" : "&#9734;"}</button>`;
+    // The markup comes from wlRowHtml, which escapes everything the source
+    // supplied (symbol, name, logo address): see escHtml.
+    row.innerHTML = wlRowHtml(ins, {
+      logo: lg ? String(dark ? lg.dark : lg.light) : "",
+      initial: logoInitial(ins), hist, stale, fav,
+      price: state.prices[ins.symbol] ? fmtQuote(ins.symbol, state.prices[ins.symbol]) : "–",
+      spread: spreadText(ins.symbol, state.quotes[ins.symbol]),
+    });
     row.onclick = () => setSymbol(ins.symbol);
     row.querySelector(".wstar").onclick = (e) => { e.stopPropagation(); wlToggleFav(ins.symbol); };
     return row;
   };
   // WATCHLIST: the active source's starred instruments, first group in the
-  // sidebar, open by default; a symbol that left the source's catalog is
-  // simply not shown (its star survives in the list for when it returns).
+  // sidebar, open by default. Verified saved LSE spellings reuse canonical
+  // metadata while keeping their own names for charts, quotes and the ticket.
+  // Unknown names remain hidden; no instrument metadata is invented.
   {
     const favs = wlFavs();
     const bySym = new Map(state.instruments.map((i) => [i.symbol, i]));
-    const items = favs.map((sy) => bySym.get(sy)).filter(Boolean);
+    const items = favs.map((sy) => catalogInstrument(sy, bySym)).filter(Boolean);
     const open = state.groupsOpen[WL_FAV_GROUP] !== false;
     const head = document.createElement("div");
     head.className = "wgroup wgroup-fav";
@@ -755,12 +1546,24 @@ function renderWatchlist() {
     el.appendChild(head);
     if (open) for (const ins of items) el.appendChild(wrow(ins));
   }
+  // A page of a bigger catalog says so, above the folders it is a page of.
+  {
+    const note = wlCutNote(state.instruments.length, state.instrumentsTotal || 0,
+                           state.provider === "lse" ? 0 : 5000);
+    if (note) {
+      const n = document.createElement("div");
+      n.className = "wnote";
+      n.textContent = note;
+      el.appendChild(n);
+    }
+  }
   for (const g of groups) {
     const open = !!state.groupsOpen[g.cat];
     const head = document.createElement("div");
     head.className = "wgroup";
+    // the folder name is the source's own category text: escaped
     head.innerHTML = `<span class="wcaret">${open ? "▾" : "▸"}</span>` +
-      `${g.cat}<span class="wcount">${g.items.length}</span>`;
+      `${escHtml(g.cat)}<span class="wcount">${g.items.length}</span>`;
     head.onclick = () => {
       state.groupsOpen[g.cat] = !open;
       state.groupShown[g.cat] = WL_CHUNK;   // reopening starts from the top
@@ -781,7 +1584,8 @@ function renderWatchlist() {
   }
   wlWireGrow(pendingGrow);
   // Folder opens/closes expose new rows; price them now instead of waiting
-  // out the rest of the current poll second (rects need layout first).
+  // out the rest of the current poll interval (rects need layout first).
+  // The shared minimum-attempt gate coalesces these primes.
   setTimeout(pollPrices, 50);
 }
 
@@ -831,6 +1635,67 @@ function isBrokerSource(name) {
   return String(name || "").startsWith("broker:");
 }
 
+/* What MARKETS's own page (PRICE & CHARTS) shows: the key form, or the
+   charts with the ticket and the dock. Without an LSE key it is the key form
+   unless the source is one of the user's own, a vendor key or a broker's
+   source; with a key, the charts. It is decided from what is known, when the
+   tab is clicked and again whenever the source changes while that page is up
+   (runSwitchProvider): at boot the tab's click and the source being chosen
+   race, and the same page showed the key form on one load and an empty LSE
+   chart on the next. */
+function marketsWantsKey() {
+  const own = !!state.provider && state.provider !== "lse" && isLiveSource(state.provider);
+  return !state.lseConfigured && !own;
+}
+
+// MARKETS is the tab in use and its own page is the one up (not OPTIONS,
+// NEWS or SCREENER under it).
+function marketsMainShowing() {
+  const rail = $("rail-markets");
+  if (!rail || !rail.classList.contains("active")) return false;
+  return ["optpage", "scrpage", "news"].every((id) => { const e = $(id); return !e || e.classList.contains("hidden"); });
+}
+
+// The decision applied to that page: the key form (with the sidebar's line
+// saying why the list is empty) or the charts; the ticket follows (tpx.sync).
+function marketsDecide() {
+  if (marketsWantsKey()) {
+    renderConnBar();
+    const wl = $("watchlist");
+    if (wl) {
+      wl.innerHTML =
+        '<div class="empty-actions"><div class="md-empty">' +
+        'Live pairs appear here once your LSE API key is connected.</div></div>';
+    }
+    $("charts").classList.add("hidden");
+    $("lse-connect").classList.remove("hidden");
+  } else {
+    $("lse-connect").classList.add("hidden");
+    $("charts").classList.remove("hidden");
+  }
+  if (typeof tpx !== "undefined" && tpx.sync) tpx.sync();
+}
+
+/* With no LSE key, once the ticket has chosen its broker and the engine's
+   record has been read (tpbSetup; again after the ticket line's Connect): a
+   request out or held there, on any broker, puts MARKETS on the ticket
+   broker's own source, so the ticket and its line (the warning, Ask again,
+   Connect) are on screen. It sat on a ticket hidden behind the key form
+   until the user pressed Use. Nothing held: the key form, as on a first
+   run. A source the user chose is kept; a user on another tab is left
+   there. */
+function marketsBootSource() {
+  if (state.hosted || state.lseConfigured || !marketsMainShowing()) return;
+  const own = !!state.provider && state.provider !== "lse" && isLiveSource(state.provider);
+  if (own && state.provider !== state.marketsBoot) return;
+  const held = (tpx.record || []).some((e) => e && (e.state == null || e.state === "out" || e.state === "unknown"));
+  if (!held) return;
+  const name = tpbSourceName();
+  if (!name || name === state.provider) return;
+  state.marketsBoot = name;
+  enterLiveSource(name);
+}
+
 /* The source BACKTESTS and RESEARCH read, which is deliberately not the
    broker. A venue keeps a shallow slice of history next to the LSE archive,
    so following the broker here would silently shrink every backtest to
@@ -860,6 +1725,11 @@ function enterLiveSource(name) {
   $("lse-connect").classList.add("hidden");
   $("charts").classList.remove("hidden");
   switchProvider(name);
+  // The chart surface just came up (or changed source), and the ticket's
+  // visibility hangs on exactly that. Without this a user with no LSE key who
+  // pressed "Use" on their own broker got its chart and no ticket until they
+  // happened to click a rail tab.
+  if (typeof tpx !== "undefined" && tpx.sync) tpx.sync();
 }
 
 /* ---------- data connection bar (top of the sidebar) ---------- */
@@ -905,7 +1775,11 @@ function activeBrokerLabel() {
   const row = brokerPicker.rows.find((x) => x.broker === tpb.broker);
   const name = row ? brokerDisplayName(row) : tpb.broker;
   const mode = row ? String(brokerIdentity(row).mode || row.mode || "") : "";
-  return mode === "live" ? `${name} (LIVE)` : name;
+  if (mode !== "live") return name;
+  // Real money is named here at all times (SPEC 3), and so is whether this
+  // session may send orders to it: a live broker that was connected without
+  // that consent is read-only, and the engine refuses its orders.
+  return row && row.connected && !row.armed ? `${name} (LIVE, read-only)` : `${name} (LIVE)`;
 }
 
 function closeConnMenu() {
@@ -924,6 +1798,7 @@ async function saveLseKey(key) {
     body: JSON.stringify({ key }),
   });
   if (!r.ok) throw new Error(`could not save the key (HTTP ${r.status})`);
+  resetPricePollKey();
   const probe = await fetch("/api/instruments?provider=lse&query=&limit=1");
   if (!probe.ok) throw new Error("The LSE API rejected this key. Check for typos and try again.");
   state.lseConfigured = true;
@@ -965,8 +1840,10 @@ async function openConnMenu() {
   const keyline = document.createElement("div");
   keyline.className = "conn-keyline hidden";
   keyline.innerHTML =
-    `<input type="password" placeholder="lse_live_..." autocomplete="off" spellcheck="false">` +
+    `<input type="text" class="cs-secret" placeholder="lse_live_..." autocomplete="off" spellcheck="false">` +
     `<button>Save</button>`;
+  // a key box no browser offers to save (csSecretBox)
+  csSecretBox(keyline.querySelector("input"));
   menu.appendChild(keyline);
   const err = document.createElement("div");
   err.className = "conn-err hidden";
@@ -1069,6 +1946,8 @@ function brokerTooltip(b) {
   if (id.website) lines.push(id.website);
   if (id.support) lines.push(id.support);
   if (id.adapter && id.adapter.name) lines.push(`adapter ${id.adapter.name} ${id.adapter.version || ""}`.trim());
+  // The broker's terms, in one sentence (SPEC 3.3).
+  if (b.terms && (b.terms.said || b.terms.summary)) lines.push(String(b.terms.said || b.terms.summary));
   if (b.unlinked) lines.push("no longer linked; still connected");
   else lines.push(b.registered ? "linked by you" : "shipped with the terminal");
   return lines.join("\n");
@@ -1081,6 +1960,158 @@ function brokerTooltip(b) {
    order path, so this is the polite half of the rule, not the whole rule. */
 function brokerIsPaper(b) {
   return String(brokerIdentity(b).mode || b.mode || "") === "paper";
+}
+
+/* ── A broker's terms (Brue Connect SPEC 3.3) ──────────────────────────────
+   What the broker's own agreement lets the terminal do with a connection, as
+   the engine's row states it (`terms`: the stricter of our listing and the
+   broker's handshake). Each flag only takes something away:
+   - data_local_only: the broker's prices (quotes, bars, the current price of
+     its positions) are shown and used on this computer, and nothing handed to
+     an AI carries them: the screen map and the account the assistants read
+     say "withheld" and why, and no screenshot is taken while they are shown;
+   - orders_by_hand_only, on a connection that is not paper: every order is
+     the user's own, from the terminal's own window (the ticket, the
+     positions, the chart); the assistants are told so.
+   The engine enforces both on its own and words every sentence; the page
+   keeps what IT hands the assistants clean, and shows the terms as text.
+   A broker this page has no row for is treated as withholding: what its
+   terms say is not known here, and not known is not "nothing". */
+function brokerTermsOf(rows, broker) {
+  const row = (rows || []).find((b) => b && b.broker === broker);
+  const t = row && row.terms;
+  return t && typeof t === "object" ? t : null;
+}
+
+function termsWithheld(rows, broker) {
+  if (!broker || broker === "lse-hosted") return "";
+  const known = (rows || []).some((b) => b && b.broker === broker);
+  if (!known) return "Withheld: the terms of this connection are not known here yet.";
+  const t = brokerTermsOf(rows, broker);
+  if (!t || !t.data_local_only) return "";
+  return String(t.withheld || "Withheld under this broker's terms, which keep its prices on this computer.");
+}
+
+/* The sentence an order the user did not place is refused with, on a
+   connection whose broker has every order on a live account placed by hand;
+   "" when none applies. `by_hand` is set by the engine only when the
+   connection is not paper. */
+function termsByHand(rows, broker) {
+  if (!broker || broker === "lse-hosted") return "";
+  const t = brokerTermsOf(rows, broker);
+  return t && t.by_hand ? String(t.by_hand) : "";
+}
+
+/* What stays of the account and its positions when a broker's prices stay on
+   this computer: the account's own record (SPEC 3.3). Every other field is
+   set to null: the prices, and every figure marked to them (a position's
+   unrealised P/L, the account's equity, open P/L and margin), which with the
+   size and the entry price give the price back. A field added to the account
+   later is withheld until it is named here. */
+const AI_ACCOUNT_KEEP = ["name", "balance", "leverage", "currency", "starting_balance", "positions", "error", "note"];
+const AI_POSITION_KEEP = ["symbol", "side", "qty", "avg_price", "sl_price", "tp_price", "trail_points", "opened_at"];
+
+/* The account the assistants read, with those figures left out and the
+   reason in their place. */
+function aiWithholdAccount(acct, why) {
+  if (!why || !acct || typeof acct !== "object") return acct;
+  const out = {};
+  for (const k of Object.keys(acct)) out[k] = AI_ACCOUNT_KEEP.includes(k) ? acct[k] : null;
+  // Positions only as the page built them: a failed snapshot stays one.
+  if (!Array.isArray(acct.positions)) {
+    if ("positions" in acct) out.positions = null;
+    out.prices_withheld = why;
+    return out;
+  }
+  out.positions = acct.positions.map((p) => {
+    if (!p || typeof p !== "object") return p;
+    const q = {};
+    for (const k of Object.keys(p)) q[k] = AI_POSITION_KEEP.includes(k) ? p[k] : null;
+    // A stop the broker trails is moved by the broker from the price: with
+    // its distance it gives back the best price since entry. The distance,
+    // the user's own choice, stays, and the position says what is held back,
+    // since a null sl_price otherwise means "no stop set".
+    if (q.trail_points) {
+      q.sl_price = null;
+      q.withheld = "The level of a stop the broker trails " +
+        (/^Withheld\b/.test(why) ? "withheld" + why.slice("Withheld".length) : "withheld. " + why);
+    }
+    return q;
+  });
+  out.prices_withheld = why;
+  return out;
+}
+
+/* The chart region of the screen map without the chart's prices. */
+function aiWithholdChart(data, why) {
+  if (!why || !data || typeof data !== "object") return data;
+  return Object.assign({}, data, { last_close: null, bid: null, ask: null,
+                                   prices_withheld: why });
+}
+
+/* What the screen map's trade ticket tells an assistant about placing an
+   order: its usual doors, or, on a live by-hand connection, the sentence. */
+function aiTradeDoor(rows, broker, more) {
+  const why = termsByHand(rows, broker);
+  return why ? [why] : more;
+}
+
+/* Why no screenshot may go to an agent now, or "": the chart's source or the
+   ticket's broker is a connection whose prices stay on this computer. */
+function aiCaptureWithheld(rows, chartProvider, ticketBroker) {
+  const chart = isBrokerSource(chartProvider) ? String(chartProvider).slice("broker:".length) : "";
+  for (const b of [chart, ticketBroker]) {
+    const why = termsWithheld(rows, b);
+    if (why) return why;
+  }
+  return "";
+}
+
+/* The terms on a connection's row, and when a live one is armed: the
+   engine's words for them as text (never markup), and the terms themselves
+   one click away when the broker gave an https address. null when the
+   broker's terms say nothing. */
+function csTermsLine(terms) {
+  if (!terms || typeof terms !== "object") return null;
+  // The engine's sentence first. With one restriction in force it is the
+  // broker's summary with its full stop, else the terminal's own sentence.
+  // With both, the summary (when there is one) followed by the terminal's
+  // sentence naming each, unless the summary is our listing's own and the
+  // listing says it names both: then the summary alone, said once.
+  const said = String(terms.said || terms.summary || "").trim();
+  if (!said) return null;
+  const line = document.createElement("div");
+  line.className = "cs-terms";
+  const txt = document.createElement("span");
+  txt.textContent = said;
+  line.appendChild(txt);
+  const url = String(terms.url || "");
+  if (/^https:\/\/[^\s"'<>]+$/.test(url)) {
+    line.append(" ");
+    const a = document.createElement("a");
+    a.className = "cs-support cs-terms-link";
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = "Read the terms";
+    line.appendChild(a);
+  }
+  return line;
+}
+
+/* The broker list, read again now: the terms an assistant's context is built
+   from must be the engine's of this moment. Best effort and capped; the rows
+   already held stand when the engine does not answer in time. */
+async function brokerRowsFresh() {
+  if (state.hosted) return;
+  try {
+    const r = await Promise.race([fetch("/api/broker/list"),
+      new Promise((res) => setTimeout(() => res(null), 1500))]);
+    if (r && r.ok) {
+      const rows = await r.json();
+      if (Array.isArray(rows)) brokerPicker.rows = rows;
+    }
+  } catch (e) { /* the rows held stand */ }
 }
 
 /* Disconnect a broker and, when the trade ticket was pointed at it, fall the
@@ -1097,6 +2128,7 @@ async function brokerDisconnect(broker) {
     if (typeof tpbSwitch === "function") await tpbSwitch("lse-hosted");
   }
   renderConnBar();
+  if (typeof tpx !== "undefined" && tpx.sync) tpx.sync();
 }
 
 function brokerRow(b) {
@@ -1134,6 +2166,8 @@ function brokerRow(b) {
     off.innerHTML = "&#10005;";
     off.onclick = async (e) => {
       e.stopPropagation();
+      // a request out or held on it: asked first (tpxHeldAsk)
+      if (!(await tpxHeldAsk(b.broker, "Disconnect"))) return;
       await brokerDisconnect(b.broker);
       refreshBrokerRows();
     };
@@ -1216,6 +2250,35 @@ async function brokerProbeUnknown(brokers) {
   if (learned && !$("conn-menu").classList.contains("hidden")) refreshBrokerRows();
 }
 
+/* The sentence that asks for consent to trade real money. One wording, used
+   by Connect and by the card's "Allow trading" button. */
+function brokerLiveQuestion(b) {
+  const m = String(brokerIdentity(b).mode || b.mode || "");
+  const what = m === "live" ? "a LIVE account" : `mode "${m || "unknown"}"`;
+  return `${brokerDisplayName(b)} reports ${what}. Orders sent here may be real. ` +
+         `Connect and allow trading?`;
+}
+
+/* Carry the user's consent to the engine: arm this connection for orders.
+   Returns true only when the engine says it is armed. The rule itself is the
+   engine's (an unarmed live broker's orders are refused with a 403); this is
+   how the refusal becomes a decision instead of a dead end. */
+async function brokerArm(broker) {
+  try {
+    const r = await fetch("/api/broker/arm", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ broker, armed: true }),
+    });
+    if (!r.ok) return false;
+    const out = await r.json();
+    return !!out.armed;
+  } catch (e) { return false; } // unarmed: the engine will refuse orders, which is correct
+}
+
+/* Connect a broker from a row. Resolves to what happened:
+   {ok, connected, readOnly, armed, needsAccount, error}. A failed connect is
+   reported, not swallowed: the card that asked shows the broker's own reason
+   and its Connect button works again. */
 async function pickBroker(b) {
   // A broker whose mode nobody has asked about yet is not evidence of real
   // money, it is an unasked question. `hello` is answerable cold (SPEC 3.1)
@@ -1225,7 +2288,12 @@ async function pickBroker(b) {
   // probe of its own (the dropdown's brokerProbeUnknown only runs while that
   // menu is open), which is how a paper venue reached this dialog reporting
   // mode "unknown".
-  if (!brokerIsPaper(b) && !String(brokerIdentity(b).mode || b.mode || "")) {
+  // The same handshake answers a live login, never bound, whose row does not
+  // know whether it reaches several accounts (null: a profile remembered by
+  // an earlier build): asked at Connect, it could be a question about an
+  // account not yet chosen, which was dropped once the chooser came up.
+  const unknownAccounts = b.accounts_multi === null && !b.connected && !b.account_id;
+  if (!brokerIsPaper(b) && (!String(brokerIdentity(b).mode || b.mode || "") || unknownAccounts)) {
     try {
       const r = await fetch("/api/broker/probe", {
         method: "POST", headers: { "Content-Type": "application/json" },
@@ -1234,25 +2302,32 @@ async function pickBroker(b) {
       if (r.ok) b = await r.json();
     } catch (e) { /* unprobeable: fall through to the careful path below */ }
   }
-  // A broker whose login reaches several accounts has no single mode: the
-  // last one you used may have been live, the one you are about to pick may
-  // be demo. Warning at CONNECT time therefore asks about a decision that
-  // has not been made yet, using a stale answer. The warning belongs to the
-  // account, and the account row states it before you commit.
-  // Undecided = nothing is bound yet. A remembered "live" then describes the
-  // account you used LAST time, not the one this connect will land on.
-  const undecided = !b.connected && !b.account_id;
-  const paper = brokerIsPaper(b) || undecided;
-  if (!paper) {
+  // A broker whose login reaches SEVERAL accounts has no single mode until
+  // one is chosen: the last one you used may have been live, the one you are
+  // about to pick may be demo. Asking at connect time would be asking about
+  // a decision that has not been made, using a stale answer; there the
+  // account row states real or demo before you commit, and the card offers
+  // "Allow trading" once a live account is bound.
+  // That exception is ONLY for a login known to reach several accounts with
+  // none bound: one that lists several, or whose own hello said it can
+  // (accounts_multi) and that was never bound (asked here, its answer was
+  // dropped once the chooser came up, and the card asked again). It used to
+  // cover every broker that was not connected and had no stored account,
+  // which is every single-account broker: a live one was then never asked
+  // and never armed, and every order it was sent came back refused. One of
+  // these that binds its only account as it connects is asked just after.
+  const choosing = !b.connected && !b.account_id
+    && (!!b.needs_account || (b.accounts || []).length > 1 || !!b.accounts_multi);
+  const paper = brokerIsPaper(b);
+  const askedBefore = !paper && !choosing;
+  let allow = false;
+  if (askedBefore) {
     // Real money is never reached by one click. The engine refuses the order
     // regardless (an unarmed live broker gets a 403), so this dialog is what
-    // turns that refusal into consent rather than a dead end.
-    const m = String(brokerIdentity(b).mode || b.mode || "");
-    const what = m === "live" ? "a LIVE account" : `mode "${m || "unknown"}"`;
-    const ok = await askConfirm(
-      `${brokerDisplayName(b)} reports ${what}. Orders sent here may be real. ` +
-      `Connect and allow trading?`);
-    if (!ok) return;
+    // turns that refusal into consent rather than a dead end. Declining still
+    // connects, read-only: looking at an account is not trading it.
+    // The broker's terms are shown with the question (SPEC 3.3).
+    allow = await askConfirm(brokerLiveQuestion(b), "Allow trading", "Connect read-only", b.terms);
   }
   closeConnMenu();
   // A broker that still needs the user (log in, or pick an account) has its
@@ -1266,18 +2341,44 @@ async function pickBroker(b) {
     sel.appendChild(o);
   }
   if (sel) sel.value = b.broker;
-  if (typeof tpbSwitch === "function") await tpbSwitch(b.broker);
-  // Armed only AFTER the connection succeeded, and only for the broker the
-  // user just said yes to. A failed connect leaves nothing armed.
-  if (!paper && typeof tpb !== "undefined" && tpb.broker === b.broker) {
-    try {
-      await fetch("/api/broker/arm", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ broker: b.broker, armed: true }),
-      });
-    } catch (e) { /* unarmed: the engine will refuse orders, which is correct */ }
+  const res = (typeof tpbSwitch === "function" ? await tpbSwitch(b.broker) : null) || {};
+  if (res.ok === false) {
+    renderConnBar();
+    return { ok: false, error: res.error || "the broker did not connect" };
+  }
+  // What the connection actually is, from the engine's row for it (tpbSwitch
+  // re-read the list): the mode here is the live handshake's, not a memory.
+  const row = (brokerPicker.rows || []).find((x) => x.broker === b.broker) || {};
+  const out = { ok: true, connected: !!row.connected, armed: !!row.armed,
+                needsAccount: !!res.needsAccount, readOnly: false };
+  if (out.connected && !brokerIsPaper(row)) {
+    // Nobody was asked above: remembered as paper and connected as something
+    // else (its file was changed to "live" since its last connect, the
+    // walkthrough's own step, or the venue changed), or a login that could
+    // reach several accounts and was bound to its only one. Ask now, while
+    // the connection is open read-only and its account is the one in use:
+    // the same question, answered before anything can trade.
+    if (!askedBefore) {
+      // The Connections screen behind the question says what is so first:
+      // connected, live and read-only, from the engine's row. It went on
+      // saying "Not connected" with "Connecting…" until the answer came.
+      const screen = $("conn-screen");
+      if (screen && !screen.classList.contains("hidden")) renderConnScreen(true);
+      allow = await askConfirm(
+        brokerLiveQuestion(row).replace(/Connect and allow trading\?$/, "Allow trading?"),
+        "Allow trading", "Stay read-only", row.terms);
+    }
+    // Armed only AFTER the connection succeeded, only for the broker the user
+    // just said yes to, and only when they said yes. A failed connect leaves
+    // nothing armed, and neither does a "no".
+    if (allow && typeof tpb !== "undefined" && tpb.broker === b.broker) {
+      out.armed = await brokerArm(b.broker);
+      row.armed = out.armed;
+    }
+    out.readOnly = !out.armed;
   }
   renderConnBar();
+  return out;
 }
 
 function setupConnBar() {
@@ -1300,6 +2401,14 @@ function setupConnBar() {
       closeConnScreen();
     }
   });
+  // A window made shorter or taller, or zoomed, with the sheet open: it is
+  // hung again (csHang) and its scroll bar's room read again (csGutter).
+  window.addEventListener("resize", () => {
+    if ($("conn-screen").classList.contains("hidden")) return;
+    csHang();
+    csGutter();
+  });
+  csPressWatch();
 }
 
 /* ── Connection screen ─────────────────────────────────────────────────────
@@ -1313,20 +2422,137 @@ function setupConnBar() {
    engine already fetches and caches, merged at render time with the hub's live
    connection state (/api/broker/list). */
 const connScreen = { dir: [], origin: "", broker: null,
-                     brokerPinned: false, pickOpen: false, sig: "" };
+                     brokerPinned: false, pickOpen: false, sig: "",
+                     // which cards have "Lines the adapter printed" open,
+                     // kept across repaints (csBrokerCard)
+                     printedOpen: {},
+                     // per broker, the account the chooser's first click
+                     // previewed, kept across repaints (csBrokerCard)
+                     acctPreview: {},
+                     // "Add your own broker": the adapters this engine's kit
+                     // offers in one click, whether the engine is too old to
+                     // link at all, the form (open, busy, what was typed,
+                     // which field to put the cursor back in) and what the
+                     // last attempt said.
+                     examples: [], linkOld: false,
+                     addOpen: false, addBusy: false, addFocus: "",
+                     addDraft: { name: "", path: "", args: "" },
+                     addError: null,   // {message, stderr, update}
+                     // This machine's facts for that card (GET
+                     // /api/broker/own-guide): undefined until asked, null
+                     // while asked, then the answer or {failed: true}.
+                     ownGuide: undefined,
+                     devOpen: false,     // the add card's "For developers" fold
+                     addSaved: null,     // {path, folder, existing} once "Create my starter adapter" ran
+                     addDownloaded: false,
+                     // Per broker: one line about what just happened on its
+                     // card, and why its last action failed. Kept here
+                     // because the card is rebuilt on every repaint.
+                     notes: {}, errors: {}, keysOpen: {},
+                     // Per broker: what has been typed into its key boxes
+                     // and not yet submitted (see csDraft). In memory only.
+                     keyDrafts: {} };
+
+/* ── Key-box drafts ────────────────────────────────────────────────────────
+   The Connections screen rebuilds its whole body whenever anything it shows
+   changes, and it re-reads the engine on a timer. A rebuild makes new, empty
+   inputs. So what a person has typed into a broker's key boxes cannot live in
+   the inputs: it lives here, each keystroke, and every rebuild puts it back
+   (the cursor too: see renderConnScreen). Without this, someone pasting two
+   long keys watched the first one vanish while they fetched the second.
+
+   The rules, because these are secrets:
+   - memory only. Never localStorage, never sessionStorage, never a cookie,
+     never a request. The one way a draft leaves the page is the Connect
+     button, through csConnect, to the user's own engine.
+   - short-lived. A broker's drafts are dropped the moment they are submitted,
+     when the user closes its card or the screen, when its keys are forgotten
+     and when it is unlinked. Nothing is kept "for next time". */
+function csDraft(broker, field) {
+  const d = connScreen.keyDrafts[broker];
+  return (d && typeof d[field] === "string") ? d[field] : "";
+}
+
+function csDraftSet(broker, field, value) {
+  const v = String(value == null ? "" : value);
+  let d = connScreen.keyDrafts[broker];
+  if (v === "") {
+    if (!d) return;
+    delete d[field];
+    if (!Object.keys(d).length) delete connScreen.keyDrafts[broker];
+    return;
+  }
+  if (!d) d = connScreen.keyDrafts[broker] = {};
+  d[field] = v;
+}
+
+/* Forget one broker's drafts, or everybody's when no broker is named. */
+function csDraftDrop(broker) {
+  if (broker === undefined) connScreen.keyDrafts = {};
+  else delete connScreen.keyDrafts[broker];
+}
+
+/* Fields that a LISTING marks required and that have neither a typed nor a
+   stored value: Connect stops for these and names them, before anything is
+   sent. Only a directory row can mark a field required. A form declared by an
+   adapter's own handshake has no such flag (brue-connect SPEC 3.2: an adapter
+   that cannot go on without a value says so itself), so its fields never
+   block here; see csEmptyFields for what the card says about those. */
+function csMissingFields(fields, values, stored) {
+  return (fields || []).filter((f) => f && f.required === true
+    && !String((values || {})[f.key] || "").trim()
+    && !(stored && stored.has(f.key)));
+}
+
+/* Every declared field with neither a typed nor a stored value, required or
+   not. Shown beside a broker's refusal, so "the key was rejected" can be read
+   next to "you left the secret empty" without knowing its variable names. */
+function csEmptyFields(fields, values, stored) {
+  return (fields || []).filter((f) => f && f.key
+    && !String((values || {})[f.key] || "").trim()
+    && !(stored && stored.has(f.key)));
+}
+
+/* "A", "A and B", "A, B and C": field labels in a sentence. */
+function csListWords(labels) {
+  const l = (labels || []).map(String);
+  if (l.length < 2) return l.join("");
+  return l.slice(0, -1).join(", ") + " and " + l[l.length - 1];
+}
+
+/* A broker the user linked from one of the rows this terminal ships (the
+   engine marks such a profile with its example's key) wears that row's mark:
+   linking a listed broker does not turn its logo back into two letters. */
+function csExampleLogo(e) {
+  const ex = e && e.hub && e.hub.example;
+  if (!ex) return "";
+  const x = (connScreen.examples || []).find((r) => r && r.key === ex);
+  return (x && x.logo) ? String(x.logo) : "";
+}
 
 /* The broker's own mark for the picker row, or its initials when it has no
    art. Same grayscale treatment as the card, so the list reads as one thing. */
 function csBrokerMark(e) {
   const src = (e.d && (e.d.logo || (connScreen.origin && e.d.logo_url
-    ? connScreen.origin + e.d.logo_url : ""))) || "";
+    ? connScreen.origin + e.d.logo_url : ""))) || csExampleLogo(e);
   const mono = (e.label || "?").slice(0, 2).toUpperCase();
   return src
     ? `<img src="${csEsc(src)}" alt="">`
     : `<span class="cs-pickinit">${csEsc(mono)}</span>`;
 }
 
-function closeConnScreen() { $("conn-screen").classList.add("hidden"); }
+function closeConnScreen() {
+  $("conn-screen").classList.add("hidden");
+  // The user closed the screen, and every card with it: nothing typed and
+  // unsubmitted is kept behind a closed door (see csDraft). That means the
+  // boxes too, not only the draft store: the screen is hidden, not removed,
+  // so the inputs are still in the document holding what was typed, and
+  // opening the screen again does not rebuild them when nothing else changed.
+  // They are emptied now, and the next opening is made to rebuild.
+  csDraftDrop();
+  for (const inp of document.querySelectorAll("#cs-body input[data-cred]")) inp.value = "";
+  connScreen.sig = "";
+}
 
 /* "Inquire" (Connections footer, bottom right): a broker asking to be
    connected. POSTs straight to the hosted API, NOT the local engine: the
@@ -1439,8 +2665,74 @@ function connScreenWatch() {
     }, waiting ? 2000 : 6000);
 }
 
+/* The listed rows' last known examples (GET /api/broker/examples), kept for
+   the next page in this browser's store, so the screen's first paint gives
+   the listed rows their places: they used to come with the refresh, 34 to 67
+   ms after the first paint, ABOVE the linked rows and "Add your own broker",
+   and push them about 190 px down under the pointer. The engine's public
+   listing only, never a key. Every read and write is in a try: a store that
+   throws, or holds something that is not a list of rows, is an empty one. */
+function csExamplesKept() {
+  try {
+    const rows = JSON.parse(localStorage.getItem("lse.cs.examples") || "null");
+    if (!Array.isArray(rows)) return [];
+    return rows.filter((x) => x && typeof x === "object" && !Array.isArray(x) && typeof x.key === "string" && x.key);
+  } catch (e) {
+    return [];
+  }
+}
+function csExamplesKeep(rows) {
+  try { localStorage.setItem("lse.cs.examples", JSON.stringify(rows || [])); } catch (e) { /* not kept: next time waits */ }
+}
+
+/* Where the sheet hangs (style.css, #conn-screen): 12px below the header, its
+   bottom and the rule drawn under it, when that is lower than 6vh. Read when
+   the sheet opens and when the window changes size, at no other time: a
+   sheet hung again while it is open would move every row on it. */
+function csHang() {
+  const head = document.querySelector("body > header"), screen = $("conn-screen");
+  if (!head || !screen) return;
+  screen.style.setProperty("--cs-top", Math.ceil(head.getBoundingClientRect().bottom + 1) + "px");
+}
+
+/* The room the sheet keeps for its scroll bar from the start (scrollbar-gutter:
+   stable), as wide as the scroll bar is here (none where scroll bars float
+   over the page), given back from its right padding (style.css, --cs-gutter):
+   its rows have as much room on the right as on the left whether it scrolls
+   or not. Read once the sheet is shown, before it is painted. */
+function csGutter() {
+  const card = $("cs-card");
+  if (!card) return;
+  const cs = getComputedStyle(card);
+  const kept = card.offsetWidth - card.clientWidth
+    - (parseFloat(cs.borderLeftWidth) || 0) - (parseFloat(cs.borderRightWidth) || 0);
+  card.style.setProperty("--cs-gutter", Math.max(0, kept) + "px");
+}
+
+/* Boot draws the header's second row (the section's sub-views) when it lands
+   on its first section, its last step. A sheet hung before that would run
+   across that row once it came, or have to move to clear it: the screen
+   waits for boot to land (csLand, called by boot), never longer than
+   CS_LAND_WAIT_MS. */
+const CS_LAND_WAIT_MS = 1500;
+let csLandedNow = false;
+let csLand = () => {};
+const csLanded = new Promise((ok) => { csLand = () => { csLandedNow = true; ok(); }; });
+
 async function openConnScreen() {
+  if (typeof csLandedNow !== "undefined" && !csLandedNow) {
+    await Promise.race([csLanded, new Promise((ok) => setTimeout(ok, CS_LAND_WAIT_MS))]);
+  }
+  csHang();
   $("conn-screen").classList.remove("hidden");
+  csGutter();
+  // The listed rows' places from the last examples known: in memory, else
+  // kept for this page (csExamplesKept). With none, the rows below them wait
+  // for the first answer (renderConnScreen).
+  if (!(connScreen.examples || []).length) {
+    const kept = csExamplesKept();
+    if (kept.length) connScreen.examples = kept;
+  }
   if (!connScreen.dismissWired) {
     connScreen.dismissWired = true;
     // Click-away and Escape close the dropdown, the way every other menu on
@@ -1467,6 +2759,7 @@ async function refreshConnScreen() {
   // connected, the directory for what exists and how it looks. Both optional:
   // any that is away just leaves that part of the screen as it was.
   const jobs = [];
+  let dirJob = null;
   if (!state.hosted) {
     jobs.push(fetch("/api/broker/list")
       .then((r) => (r.ok ? r.json() : null))
@@ -1477,7 +2770,25 @@ async function refreshConnScreen() {
     // offers it a "Use" button. Read fresh, or the button is missing until
     // something else happens to refresh the provider list.
     jobs.push(refreshProviders().catch(() => { /* keep the last list */ }));
-    jobs.push((async () => {
+    // The adapters the engine's kit ships that can be linked in one click.
+    // An engine from before "add your own broker" has no such route (404 or
+    // 405): remembered, so the form can say "update the terminal" instead
+    // of offering fields that can only fail.
+    jobs.push(fetch("/api/broker/examples")
+      .then((r) => {
+        connScreen.linkOld = r.status === 404 || r.status === 405;
+        return r.ok ? r.json() : null;
+      })
+      .then((rows) => {
+        connScreen.examples = Array.isArray(rows) ? rows : [];
+        // kept for the next page's first paint (csExamplesKept)
+        if (Array.isArray(rows)) csExamplesKeep(rows);
+      })
+      .catch(() => { connScreen.examples = []; }));
+    // (the directory is read beside these, and is not waited for before the
+    // rows below the listed ones are painted: its hosted fallback can be
+    // slow; its rows come when it lands, as before)
+    dirJob = (async () => {
       // The same-origin proxy is the fast path, but a frozen or older engine
       // may not carry that route yet (it 404s). Fall back to the hosted
       // directory directly: logos travel INLINE in the payload, so the screen
@@ -1490,10 +2801,17 @@ async function refreshConnScreen() {
           .then((r) => (r.ok ? r.json() : null)).catch(() => null);
       }
       if (d) { connScreen.dir = d.brokers || []; connScreen.origin = d.origin || ""; }
-    })());
+    })();
   }
   await Promise.all(jobs);
+  // The engine has been read once (its brokers, sources and examples): the
+  // rows below the listed ones are painted from now on (renderConnScreen).
+  connScreen.loaded = true;
   if (!$("conn-screen").classList.contains("hidden")) renderConnScreen();
+  if (dirJob) {
+    await dirJob;
+    if (!$("conn-screen").classList.contains("hidden")) renderConnScreen();
+  }
   // Re-arm after every repaint: a decision that lands out of band (the user
   // finishing on the broker's page) has to reach the screen on its own.
   connScreenWatch();
@@ -1511,19 +2829,118 @@ function csSection(text) {
    nothing had changed, which closed the open dropdown a second after it was
    clicked and threw away any focus with it. */
 function csSignature() {
+  // Everything a row or its card DISPLAYS is in here. It used to cover only
+  // the connection state, so a row whose name, mode, arming, stored keys or
+  // last error changed kept its stale DOM until the user clicked something:
+  // a failed connect left its card blank with a disabled button.
   const rows = (brokerPicker.rows || []).map((b) => [b.broker, b.connected,
     b.auth_pending, b.needs_account, b.account_id,
-    (b.accounts || []).length].join(":")).join("|");
+    (b.accounts || []).length, b.label, b.registered, b.unlinked,
+    b.update_required, b.mode, b.armed, brokerIdentity(b).display_name,
+    (b.stored_credentials || []).join(","), (b.credential_form || []).length,
+    b.last_error ? b.last_error.at : "",
+    // (Not what its adapter printed: an adapter that prints as it runs would
+    // repaint the screen at every tick and throw away the account preview,
+    // the first of the chooser's two clicks. New lines are put on the card
+    // where it is, csPrintedRefresh.)
+    (b.command_preview || []).join(" "),
+    // The terms shown on the row (SPEC 3.3): a hello can change them.
+    b.terms ? [b.terms.said || b.terms.summary || "", b.terms.url || ""].join(" ") : ""].join(":")).join("|");
+  const add = [connScreen.addOpen, connScreen.addBusy, connScreen.linkOld, !!connScreen.loaded,
+    (connScreen.examples || []).map((x) => x.key).join(","),
+    connScreen.addError ? connScreen.addError.message : "",
+    JSON.stringify(connScreen.ownGuide === undefined ? "" : connScreen.ownGuide)].join(":");
   return [rows, (connScreen.dir || []).length,
-          connScreen.broker, connScreen.pickOpen, state.lseConfigured].join("~");
+          connScreen.broker, connScreen.pickOpen, state.lseConfigured, add,
+          JSON.stringify(connScreen.notes), JSON.stringify(connScreen.errors),
+          JSON.stringify(connScreen.keysOpen)].join("~");
+}
+
+/* A press under way on the screen's rows. A rebuild of the body between its
+   down and its up threw away the row it went down on: the up landed on the
+   rebuilt twin, no click was made and the press opened nothing (23 of 25
+   quick presses after a reload were lost to the rebuild the engine's first
+   answers make about 30 ms after the first paint, and every press across
+   the directory's). A rebuild asked for while a press is down
+   waits until the press has ended and its click has been taken
+   (renderConnScreen, csPressDone); a press held longer than CS_PRESS_HOLD_MS
+   is no quick one, and the rebuild is made then. */
+const CS_PRESS_HOLD_MS = 1500;
+function csPressWatch() {
+  const body = $("cs-body");
+  if (!body || connScreen.pressWired) return;
+  connScreen.pressWired = true;
+  body.addEventListener("pointerdown", (e) => {
+    if (e.isPrimary && e.button === 0) connScreen.press = { id: e.pointerId, at: Date.now() };
+  }, true);
+  const end = (e) => {
+    const p = connScreen.press;
+    if (!p || (e && e.pointerId !== undefined && e.pointerId !== p.id)) return;
+    connScreen.press = null;
+    // after the press's click, which comes after its up in the same turn
+    if (connScreen.held) setTimeout(csPressDone, 0);
+  };
+  window.addEventListener("pointerup", end, true);
+  window.addEventListener("pointercancel", end, true);
+  window.addEventListener("blur", () => end());
+}
+
+/* The rebuild a press held, once the press has ended or outlasted
+   CS_PRESS_HOLD_MS, unless one has been made since. */
+function csPressDone() {
+  const held = connScreen.held;
+  if (!held || $("conn-screen").classList.contains("hidden")) return;
+  renderConnScreen(held.force);
+}
+
+function csPressCap() {
+  if (connScreen.pressCap) return;
+  const left = CS_PRESS_HOLD_MS - (Date.now() - connScreen.press.at);
+  connScreen.pressCap = setTimeout(() => { connScreen.pressCap = null; csPressDone(); }, Math.max(0, left) + 5);
 }
 
 function renderConnScreen(force) {
   const body = $("cs-body");
   if (!body) return;
+  // A press is down on a row: rebuilt under it, it would make no click.
+  if (connScreen.press && Date.now() - connScreen.press.at < CS_PRESS_HOLD_MS) {
+    connScreen.held = { force: !!(force || (connScreen.held && connScreen.held.force)) };
+    csPressCap();
+    return;
+  }
+  const held = connScreen.held;
+  connScreen.press = null;
+  connScreen.held = null;
+  if (held && held.force) force = true;
   const sig = csSignature();
-  if (!force && sig === connScreen.sig && body.childElementCount) return;
+  if (!force && sig === connScreen.sig && body.childElementCount) {
+    // Nothing a row shows changed; what an adapter printed may have, and is
+    // put where it is shown, in place.
+    csPrintedRefresh(body);
+    return;
+  }
   connScreen.sig = sig;
+  // A rebuild throws the DOM away. What was typed into the add form lives in
+  // connScreen.addDraft and is put back by the form itself; the cursor is
+  // put back here, so a repaint caused by some other row never interrupts
+  // someone mid-word.
+  // The same goes for a broker's key boxes: their text is in
+  // connScreen.keyDrafts (csDraft), and each carries a data-cs-field name, so
+  // a key being typed when the timer refresh lands keeps its text, its focus
+  // and its caret. The scroll position of the card is kept as well, so the
+  // box being typed in does not jump.
+  const active = document.activeElement;
+  const typing = active && body.contains(active) && active.dataset
+    ? active.dataset.csField || "" : "";
+  const caret = typing ? [active.selectionStart, active.selectionEnd] : null;
+  const scroller = body.parentElement;
+  const scrolled = scroller ? scroller.scrollTop : 0;
+  // Drafts of a broker that is no longer listed have nowhere to go back to.
+  for (const k of Object.keys(connScreen.keyDrafts)) {
+    if (!(brokerPicker.rows || []).some((b) => b.broker === k)
+        && !(connScreen.dir || []).some((d) => d && d.key === k)
+        && !(connScreen.examples || []).some((x) => x && csExampleKey(x) === k)) csDraftDrop(k);
+  }
   body.innerHTML = "";
 
   // 1) DATA CONNECTION: the LSE default, then the announcement row. Other
@@ -1562,9 +2979,56 @@ function renderConnScreen(force) {
   const open = connScreen.brokerPinned
     ? connScreen.broker                       // the user's own choice, incl. "" for all closed
     : (live ? live.key : "");
-  for (const e of entries) body.appendChild(csBrokerRow(e, e.key === open));
-  body.appendChild(csComingSoonRow("Upcoming"));
-  body.appendChild(csInquireFoot());
+  // The real brokers this terminal ships an adapter for come FIRST, each a
+  // row of its own with its key boxes, linked or not: someone looking for a
+  // broker we list finds it here, not a link at the bottom of the list that
+  // leads to it. Once linked it is the user's own row (csBrokerRow), in the
+  // same place.
+  const shown = new Set();
+  for (const x of (connScreen.examples || []).filter((x) => x && x.key)) {
+    const h = (brokerPicker.rows || []).find((b) => b.example === x.key && b.registered);
+    const e = h && entries.find((y) => y.key === h.broker);
+    if (e) {
+      // (opened as well by a press made while it was painted as a listed row
+      // not set up, before the engine's answer showed it linked)
+      body.appendChild(csBrokerRow(e, e.key === open || open === csExampleKey(x)));
+      shown.add(e.key);
+    } else {
+      body.appendChild(csExampleRow(x, open === csExampleKey(x)));
+    }
+  }
+  // Until the screen has been read once, the rows below the listed ones
+  // wait: the listed rows, and the directory's, come with that answer above
+  // them, and a row painted now would be pushed down under the pointer. A
+  // line says the list is being read.
+  if (!connScreen.loaded) {
+    const wait = document.createElement("div");
+    wait.className = "cs-note cs-wait";
+    wait.textContent = "Reading the brokers on this computer…";
+    body.appendChild(wait);
+  } else {
+    for (const e of entries) if (!shown.has(e.key)) body.appendChild(csBrokerRow(e, e.key === open));
+    // The user's own door, under the brokers we list and above what is
+    // coming. It is not the Inquire footer: that one is for a FIRM asking to
+    // be listed.
+    body.appendChild(csAddBrokerRow());
+    body.appendChild(csInquireFoot());
+  }
+  if (scroller) scroller.scrollTop = scrolled;
+  const want = connScreen.addFocus || typing;
+  connScreen.addFocus = "";
+  if (want) {
+    // Found by comparing the name, not by building a selector from it: a
+    // broker's key is part of the name and is not ours to trust in a selector.
+    const again = [...body.querySelectorAll("[data-cs-field]")]
+      .find((el) => el.dataset.csField === want);
+    if (again) {
+      again.focus({ preventScroll: want === typing });
+      if (caret && want === typing) {
+        try { again.setSelectionRange(caret[0], caret[1]); } catch (e) { /* not a text field */ }
+      }
+    }
+  }
 }
 
 /* One venue in the list: the header row is always visible, the detail card
@@ -1573,29 +3037,1038 @@ function renderConnScreen(force) {
    as two copies of the same broker. */
 function csBrokerRow(e, open) {
   const wrap = document.createElement("div");
+  const hub = e.hub || null;
+  // A broker the user linked themselves: no listing of ours describes it, so
+  // everything on its row is the adapter's own handshake (SPEC 3.1) plus the
+  // one thing the adapter cannot choose, the profile ID the user gave it.
+  const own = !!(hub && hub.registered);
   wrap.className = "cs-brow" + (open ? " open" : "")
-    + (e.hub && e.hub.connected ? " on" : "");
+    + (hub && hub.connected ? " on" : "") + (own ? " cs-own" : "");
+  wrap.dataset.broker = e.key;
   const head = document.createElement("button");
   head.className = "cs-bhead";
-  const tag = (e.d && e.d.tagline)
-    || (e.hub && brokerIdentity(e.hub).tagline) || "";
-  head.innerHTML = `<span class="cs-pickmark">${csBrokerMark(e)}</span>`
-    + `<span class="cs-bheadmid"><span class="cs-pickname">${csEsc(e.label)}</span>`
-    + (tag ? `<span class="cs-btag">${csEsc(tag)}</span>` : "")
-    + "</span>"
-    + (e.hub && e.hub.connected
-        ? '<span class="cs-pickstate">connected</span>'
-        : (csNeedsUpdate(e) ? '<span class="cs-pickstate upd">update to use</span>' : ""))
-    + '<span class="cs-pickcaret"></span>';
+  const id = hub ? brokerIdentity(hub) : {};
+  const name = own ? brokerDisplayName(hub) : e.label;
+
+  const mark = document.createElement("span");
+  mark.className = "cs-pickmark";
+  const exLogo = own ? csExampleLogo(e) : "";
+  if (exLogo) {
+    // Linked from a row this terminal ships: that row's own logo.
+    mark.classList.add("logo-tile");
+    const img = document.createElement("img");
+    img.src = exLogo;
+    img.alt = "";
+    mark.appendChild(img);
+  } else if (own) {
+    // The adapter's own monogram when it sent one (three characters at most,
+    // sanitised by the engine), else the first two letters of its name. Text,
+    // never markup: this row is built without innerHTML for that reason.
+    const init = document.createElement("span");
+    init.className = "cs-pickinit";
+    init.textContent = String(id.mark || name || "?").slice(0, id.mark ? 3 : 2).toUpperCase();
+    mark.appendChild(init);
+  } else {
+    mark.innerHTML = csBrokerMark(e);   // a listed broker's logo (escaped there)
+  }
+
+  const mid = document.createElement("span");
+  mid.className = "cs-bheadmid";
+  const line = document.createElement("span");
+  line.className = "cs-pickline";
+  const nm = document.createElement("span");
+  nm.className = "cs-pickname";
+  nm.textContent = name;
+  line.appendChild(nm);
+  if (own) {
+    // The profile ID beside the broker's own name, always: it is the one
+    // name on this row the adapter did not choose, so an adapter cannot pass
+    // for another broker by copying its display name (SPEC 3.1).
+    const pid = document.createElement("span");
+    pid.className = "cs-pickid";
+    pid.textContent = e.key;
+    line.appendChild(pid);
+  }
+  mid.appendChild(line);
+  const tag = (e.d && e.d.tagline) || id.tagline || "";
+  if (tag) {
+    const tg = document.createElement("span");
+    tg.className = "cs-btag";
+    tg.textContent = tag;
+    mid.appendChild(tg);
+  }
+
+  const st = document.createElement("span");
+  st.className = "cs-pickstate";
+  if (hub && hub.connected) { st.textContent = "Connected"; st.classList.add("ok"); }
+  else if (csNeedsUpdate(e)) { st.textContent = "Update to use"; st.classList.add("upd"); }
+  else if (own) st.textContent = hub.unlinked ? "No longer linked" : "Not connected";
+  if (own) {
+    // Real money is said on the row, in words and weight rather than an
+    // alarm colour (SPEC 1.7's rule for accounts, applied to the one-account
+    // adapter this row is). Unknown is not paper: it is named as it is.
+    const mode = String(id.mode || hub.mode || "");
+    if (mode && mode !== "paper" && mode !== "unknown") {
+      const lv = document.createElement("span");
+      lv.className = "cs-live";
+      lv.textContent = mode === "live" ? "LIVE" : mode.toUpperCase().slice(0, 12);
+      if (st.textContent) st.append(" · ");
+      st.appendChild(lv);
+    }
+  }
+  const caret = document.createElement("span");
+  caret.className = "cs-pickcaret";
+  head.append(mark, mid);
+  if (st.textContent) head.appendChild(st);
+  head.appendChild(caret);
   head.onclick = (ev) => {
     ev.stopPropagation();
     connScreen.broker = open ? "" : e.key;    // clicking the open row closes it
     connScreen.brokerPinned = true;
+    // One card is open at a time, so this click closes a card whichever row
+    // it lands on: the user put its unsubmitted keys away (see csDraft).
+    csDraftDrop();
     renderConnScreen(true);
   };
   wrap.appendChild(head);
+  // The broker's terms, on the row itself, open or closed (SPEC 3.3). Below
+  // the header rather than in it: the header is a button, and a link inside
+  // a button is a click on both.
+  const terms = csTermsLine(hub && hub.terms);
+  if (terms) wrap.appendChild(terms);
   if (open) wrap.appendChild(csBrokerCard(e.d, e.hub, { headless: true }));
   return wrap;
+}
+
+/* ── Add your own broker ───────────────────────────────────────────────────
+   A broker here is an adapter: a small program on the user's machine that
+   speaks the Brue Connect protocol for one venue. Linking one hands the engine
+   the path of that program; the engine runs it once, handshakes it, and only
+   then stores it (POST /api/broker/link). After that it is a row like any
+   other, drawn entirely from what the adapter says about itself. */
+
+/* What the user typed as a name, as the profile ID it is saved under: lower
+   case letters, digits, "-" and "_", 2 to 32 characters, starting with a
+   letter or digit. The ID names a folder on disk, hence the narrow alphabet;
+   the engine applies the same rule and is the one that counts. */
+function csSlug(name) {
+  return String(name || "").toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-").replace(/-{2,}/g, "-")
+    .replace(/^[^a-z0-9]+/, "").slice(0, 32).replace(/[-_]+$/, "");
+}
+
+/* "--paper --label \"two words\"" as the argument list the engine wants:
+   split on spaces, with double quotes keeping a phrase together. A list, not
+   a command line: nothing here is ever handed to a shell. */
+function csSplitArgs(text) {
+  const out = [];
+  const re = /"([^"]*)"|(\S+)/g;
+  let m;
+  while ((m = re.exec(String(text || "")))) out.push(m[1] !== undefined ? m[1] : m[2]);
+  return out;
+}
+
+/* The path as pasted, without the quotes Windows "Copy as path" wraps it in. */
+function csCleanPath(text) {
+  const t = String(text || "").trim();
+  return t.length >= 2 && t[0] === t[t.length - 1] && (t[0] === '"' || t[0] === "'")
+    ? t.slice(1, -1).trim() : t;
+}
+
+/* Checks that save a round trip. {message, field} for the first thing wrong,
+   or null. The engine repeats every one of them; these are not the gate. */
+function csValidateOwnBroker(draft, taken) {
+  const name = String(draft.name || "").trim();
+  if (!name) return { field: "name", message: "Give the broker a name." };
+  const id = csSlug(name);
+  if (id.length < 2) {
+    return { field: "name",
+             message: "The name needs at least two letters or digits." };
+  }
+  if (taken && taken.has(id)) {
+    return { field: "name",
+             message: `"${id}" is already in use. Choose another name.` };
+  }
+  const path = csCleanPath(draft.path);
+  if (!path) {
+    return { field: "path",
+             message: "Paste the full path to the adapter's .py file." };
+  }
+  if (!/\.py$/i.test(path)) {
+    return { field: "path",
+             message: "The adapter must be a Python file ending in .py." };
+  }
+  if (csSplitArgs(draft.args).length > 30) {
+    return { field: "args", message: "At most 30 arguments." };
+  }
+  return null;
+}
+
+/* Every ID a new link cannot take: what the engine lists, what the directory
+   lists, and the names the engine keeps for itself. */
+function csTakenIds() {
+  const taken = new Set(["paper", "paper-fast", "novafx", "lse-sim", "lse-hosted"]);
+  for (const b of brokerPicker.rows || []) taken.add(b.broker);
+  for (const d of connScreen.dir || []) if (d && d.key) taken.add(d.key);
+  return taken;
+}
+
+/* How a handshake's mode reads in a sentence. Anything that is not exactly
+   "paper" is real money as far as this screen is concerned. */
+function csModeWords(mode) {
+  const m = String(mode || "");
+  if (m === "paper") return "paper trading";
+  if (m === "live") return "a LIVE account: real money";
+  return `mode "${m || "unknown"}", treated as real money`;
+}
+
+/* Ask the engine to link an adapter. Resolves to {ok, row} or
+   {ok: false, message, stderr, update}; never throws. An engine from before
+   this feature has no such route and answers 404 or 405 (its static file
+   mount refuses the POST), which is said as what it is: update the terminal. */
+async function csLinkBroker(body) {
+  let r;
+  try {
+    r = await fetch("/api/broker/link", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    return { ok: false, message: "The terminal's engine did not answer. Try again." };
+  }
+  const out = await readResult(r);
+  // 405: an older engine's static file mount refusing the POST. 404 without
+  // this route's own answer shape (it always sends `stderr`): the same thing
+  // from an engine that routes it differently. A 404 WITH that shape is this
+  // engine saying the example is not in its kit, which is a real answer.
+  if (r.status === 405 || (r.status === 404 && !("stderr" in out))) {
+    return { ok: false, update: true,
+             message: "This terminal's engine is older than its interface. " +
+                      "Update the terminal to add your own broker." };
+  }
+  if (!r.ok) {
+    return { ok: false, stderr: String(out.stderr || ""),
+             message: String(out.detail || `The engine refused (HTTP ${r.status}).`) };
+  }
+  return { ok: true, row: out };
+}
+
+/* Run one link attempt from the form or from an example button, and leave the
+   screen saying what happened: the new row open with the adapter's own name
+   and mode, or the adapter's own error and the end of its stderr in place. */
+async function csSubmitLink(body) {
+  if (connScreen.addBusy) return;
+  connScreen.addBusy = true;
+  connScreen.addError = null;
+  renderConnScreen(true);
+  const res = await csLinkBroker(body);
+  connScreen.addBusy = false;
+  if (!res.ok) {
+    connScreen.addError = { message: res.message, stderr: res.stderr || "",
+                            update: !!res.update };
+    if (res.update) connScreen.linkOld = true;
+    renderConnScreen(true);
+    return;
+  }
+  const row = res.row || {};
+  connScreen.addOpen = false;
+  connScreen.addDraft = { name: "", path: "", args: "" };
+  connScreen.broker = row.broker || body.name;
+  connScreen.brokerPinned = true;
+  connScreen.notes[connScreen.broker] =
+    `Added. It calls itself "${brokerDisplayName(row)}" and reports ` +
+    `${csModeWords(brokerIdentity(row).mode || row.mode)}.`;
+  await refreshConnScreen();
+  renderConnScreen(true);
+}
+
+/* ── A real broker this terminal ships an adapter for ──────────────────────
+   Before it is linked it is a row of its own: its name, what it deals, the
+   boxes its key form asks for and where to make that key. Connect links it
+   (as "my-<key>", an ordinary profile of the user's own), stores what was
+   typed on this machine and connects, in that order, from one press. After
+   that it is the user's own row (csBrokerRow), in the same place. */
+
+// The row's key while it is not linked: a ":" is never part of a profile ID
+// (csSlug), so it cannot collide with a broker's name.
+function csExampleKey(x) {
+  return "example:" + String((x && x.key) || "");
+}
+
+function csExampleRow(x, open) {
+  const key = csExampleKey(x);
+  const name = String(x.name || x.label || x.key);
+  const fields = (Array.isArray(x.form) ? x.form : []).filter((f) => f && f.key && f.type !== "none");
+  const wrap = document.createElement("div");
+  wrap.className = "cs-brow cs-native" + (open ? " open" : "");
+  wrap.dataset.example = x.key;
+  const head = document.createElement("button");
+  head.className = "cs-bhead";
+  const mark = document.createElement("span");
+  mark.className = "cs-pickmark";
+  if (x.logo) {
+    // The broker's own mark, shipped inline by the engine, in a tile like the
+    // other rows' marks.
+    mark.classList.add("logo-tile");
+    const img = document.createElement("img");
+    img.src = String(x.logo);
+    img.alt = "";
+    mark.appendChild(img);
+  } else {
+    const init = document.createElement("span");
+    init.className = "cs-pickinit";
+    init.textContent = name.replace(/[^A-Za-z0-9]/g, "").slice(0, 2).toUpperCase() || "?";
+    mark.appendChild(init);
+  }
+  const mid = document.createElement("span");
+  mid.className = "cs-bheadmid";
+  const line = document.createElement("span");
+  line.className = "cs-pickline";
+  const nm = document.createElement("span");
+  nm.className = "cs-pickname";
+  nm.textContent = name;
+  line.appendChild(nm);
+  mid.appendChild(line);
+  if (x.about) {
+    const tg = document.createElement("span");
+    tg.className = "cs-btag";
+    tg.textContent = String(x.about);
+    mid.appendChild(tg);
+  }
+  const st = document.createElement("span");
+  st.className = "cs-pickstate";
+  st.textContent = "Not set up";
+  const caret = document.createElement("span");
+  caret.className = "cs-pickcaret";
+  head.append(mark, mid, st, caret);
+  head.onclick = (ev) => {
+    ev.stopPropagation();
+    connScreen.broker = open ? "" : key;      // clicking the open row closes it
+    connScreen.brokerPinned = true;
+    csDraftDrop();
+    if (!open) connScreen.addFocus = fields.length ? "cred:" + key + ":" + fields[0].key : "";
+    renderConnScreen(true);
+  };
+  wrap.appendChild(head);
+  // Our listing's statement of this broker's terms, before it is ever run.
+  const terms = csTermsLine(x.terms);
+  if (terms) wrap.appendChild(terms);
+  if (!open) return wrap;
+
+  const card = document.createElement("div");
+  card.className = "cs-bcard cs-bcard-in";
+  // What the row calls the credential its boxes ask for ("API token" on a
+  // row whose one box is the token), so the card's words match the boxes.
+  const keyName = String(x.key_name || "API key");
+  const what = document.createElement("div");
+  what.className = "cs-note";
+  what.textContent = `Connect your own ${name} account with your own ${keyName}. It is kept on ` +
+    `this computer and handed only to the ${name} connector running here.`;
+  card.appendChild(what);
+  const help = csKeysHelp(x);
+  if (help) card.appendChild(help);
+  const form = document.createElement("div");
+  form.className = "cs-form";
+  const inputs = {};
+  for (const f of fields) {
+    const lab = document.createElement("label");
+    lab.textContent = f.label || f.key;
+    const inp = document.createElement("input");
+    // a hidden field is a key box no browser offers to save (csSecretBox)
+    if (f.type === "password") csSecretBox(inp);
+    else inp.type = "text";
+    inp.autocomplete = "off";
+    inp.spellcheck = false;
+    inp.dataset.cred = f.key;
+    inp.dataset.csField = "cred:" + key + ":" + f.key;
+    inp.value = csDraft(key, f.key);
+    inp.oninput = () => csDraftSet(key, f.key, inp.value);
+    lab.appendChild(inp);
+    inputs[f.key] = inp;
+    form.appendChild(lab);
+  }
+  card.appendChild(form);
+  const err = document.createElement("div");
+  err.className = "cs-err hidden";
+  const tail = document.createElement("div");
+  tail.className = "cs-errtail hidden";
+  const failed = connScreen.errors[key];
+  if (failed) {
+    err.textContent = String(failed.message || "");     // text only: may be the adapter's words
+    err.classList.remove("hidden");
+    if (failed.stderr) {
+      tail.textContent = String(failed.stderr);
+      tail.classList.remove("hidden");
+    }
+  }
+  const actions = document.createElement("div");
+  actions.className = "cs-bactions";
+  const go = document.createElement("button");
+  go.className = "cs-connect";
+  go.textContent = connScreen.addBusy ? "Connecting…" : "Connect";
+  go.disabled = !!connScreen.addBusy;
+  go.onclick = () => csNativeConnect(x, inputs);
+  actions.appendChild(go);
+  for (const inp of Object.values(inputs)) {
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go.click(); });
+  }
+  card.append(actions, err, tail);
+  wrap.appendChild(card);
+  return wrap;
+}
+
+/* What a listed row's link calls the credential its boxes ask for: the name
+   exactly as the row gives it, its words and their case, with its spaces
+   tidied; only a leading "your", "a", "an" or "the" (in any case) is dropped,
+   because the link already reads "Get your <name> at <address>". A row that
+   gives no name (or only that word) is the "API key" its boxes say. */
+function csKeyLinkWords(keyName) {
+  const name = String(keyName || "").trim().replace(/\s+/g, " ")
+    .replace(/^(?:your|an|a|the)(?: |$)/i, "");
+  return name || "API key";
+}
+
+/* How to get a listed row's key, in the row's own words, then where to make
+   it (https only: the address is ours, EXAMPLES, but the rule is the one a
+   broker's own link meets on this screen). Text, never markup. On the row
+   before it is linked and on the user's own card after (csBrokerCard): one
+   row's help says who may not use its broker's API, which is what a refused
+   key most often means. null when the row gives neither. */
+function csKeysHelp(x) {
+  if (!x || !(x.keys_help || x.keys_url)) return null;
+  const help = document.createElement("div");
+  help.className = "cs-note";
+  help.textContent = x.keys_help ? String(x.keys_help) + " " : "";
+  if (/^https:\/\/[^\s]+$/.test(String(x.keys_url || ""))) {
+    const a = document.createElement("a");
+    a.className = "cs-support";
+    a.href = x.keys_url;
+    a.target = "_blank";
+    a.rel = "noopener";
+    a.textContent = `Get your ${csKeyLinkWords(x.key_name)} at ` +
+      String(x.keys_url).replace(/^https:\/\//, "").replace(/\/$/, "");
+    help.appendChild(a);
+  }
+  return help;
+}
+
+/* The row this terminal lists that a profile was linked from (its
+   `example`), or null: a profile of the user's own adapter has none. */
+function csListedRow(hub) {
+  const ex = hub && hub.example;
+  if (!ex) return null;
+  return (connScreen.examples || []).find((r) => r && r.key === ex) || null;
+}
+
+/* Connect on a row that is not linked yet: link, store, connect. Every box
+   is needed the first time (nothing is stored yet). What was typed is read
+   once, before anything repaints, and follows the profile it now belongs to,
+   so the linked row's boxes hold it through the repaint until it is saved.
+   The storing and connecting are the linked row's own (csConnect), so the
+   live-money question and arming stay on their one path. */
+async function csNativeConnect(x, inputs) {
+  if (connScreen.addBusy) return;
+  const key = csExampleKey(x);
+  const id = csSlug("my-" + x.key);
+  const fields = (Array.isArray(x.form) ? x.form : []).filter((f) => f && f.key && f.type !== "none");
+  const typed = {};
+  for (const f of fields) typed[f.key] = String((inputs[f.key] && inputs[f.key].value) || "").trim();
+  const missing = fields.filter((f) => !typed[f.key]);
+  if (missing.length) {
+    const names = csListWords(missing.map((f) => f.label || f.key));
+    connScreen.errors[key] = { message: `Type your ${names}, then press Connect.` };
+    connScreen.addFocus = "cred:" + key + ":" + missing[0].key;
+    renderConnScreen(true);
+    return;
+  }
+  connScreen.addBusy = true;
+  delete connScreen.errors[key];
+  renderConnScreen(true);
+  try {
+    const res = await csLinkBroker({ name: id, example: x.key });
+    if (!res.ok) {
+      connScreen.errors[key] = { message: res.message, stderr: res.stderr || "" };
+      return;
+    }
+    for (const [k, v] of Object.entries(typed)) csDraftSet(id, k, v);
+    csDraftDrop(key);
+    connScreen.broker = id;
+    connScreen.brokerPinned = true;
+    await refreshConnScreen();
+    const hub = (brokerPicker.rows || []).find((b) => b.broker === id) || null;
+    const boxes = {};
+    for (const [k, v] of Object.entries(typed)) boxes[k] = { value: v };
+    try {
+      const out = await csConnect(id, hub, boxes, []);
+      csDraftDrop(id);
+      if (out && out.ok === false) throw new Error(out.error || "the broker did not connect");
+    } catch (e) {
+      connScreen.errors[id] = { message: String((e && e.message) || e) };
+    }
+  } finally {
+    connScreen.addBusy = false;
+    await refreshConnScreen();
+    renderConnScreen(true);
+  }
+}
+
+/* ── The starter adapter and this computer's test ──────────────────────────
+   The card under "+ Add your own broker" says what an adapter is, links the
+   walkthrough's steps and the starter file, and shows the one command that
+   tests that file on this computer. The command is the engine's (GET
+   /api/broker/own-guide): only the engine knows which Python runs an adapter
+   here and where its SDK is, and it quotes the paths for the shell they are
+   pasted into. Its answer cannot change while the engine runs: asked once. */
+const CS_GUIDE_ID = "gd-add-your-own-broker";   // gdSlug("Add your own broker")
+
+async function csLoadOwnGuide() {
+  if (connScreen.ownGuide !== undefined) return;
+  connScreen.ownGuide = null;                   // asked, not answered yet
+  let g = null;
+  try {
+    const r = await fetch("/api/broker/own-guide");
+    if (r.ok) g = await r.json();
+  } catch (e) { /* the card says so (csTestHelp) */ }
+  connScreen.ownGuide = g && typeof g === "object" ? g : { failed: true };
+  if (connScreen.addOpen) renderConnScreen(true);
+}
+
+/* What the developers' fold says, from the engine's answer: {cmd, steps,
+   note} for this computer's shell, or {none} saying why there is no command;
+   null while the engine has not answered. The steps are three short lines a
+   person can follow; the naming rule is a note with its names set as code. */
+function csTestHelp(g) {
+  if (g === null || g === undefined) return null;
+  if (g.failed) {
+    return { none: "The terminal's engine did not say how to test an adapter " +
+                   "here. Close this card and open it again." };
+  }
+  if (!g.python || !g.python_version) {
+    return { none: "Testing an adapter needs Python 3.10 or newer, and none was " +
+                   "found on this computer. " +
+                   (g.platform === "win32"
+                     ? 'Install it with "Add python.exe to PATH" ticked, then restart the terminal.'
+                     : "Install it, then restart the terminal.") };
+  }
+  if (!g.python_ok) {
+    return { none: "Testing an adapter needs Python 3.10 or newer. The Python " +
+                   `this terminal found is ${g.python_version}.` };
+  }
+  const win = g.platform === "win32";
+  const mac = g.platform === "darwin";
+  const cmd = g.commands ? String((win ? g.commands.windows : g.commands.posix) || "") : "";
+  if (!cmd) {
+    return { none: "This terminal has no broker kit to test with. Update the terminal." };
+  }
+  const file = String(g.file || "my_broker_adapter.py");
+  // The window to type it in, named so that it cannot be read as this app
+  // (everywhere else "the terminal" is the LSE Terminal), opened in the
+  // folder the file is in; the command names the file bare.
+  const open = win
+    ? "In File Explorer, open the folder with the file, right-click inside it and choose " +
+      "“Open in Terminal” (Windows 10: Shift + right-click, “Open PowerShell window here”)."
+    : mac
+      ? "Open the Mac's own Terminal app (Applications, then Utilities), type cd, a space and " +
+        "the folder's path, and press Enter."
+      : "Open a shell window in the folder with the file.";
+  return {
+    cmd,
+    steps: [open, "Copy the command, paste it there and press Enter.",
+            "It passed if the last line ends with 0 fail."],
+    note: [
+      "It tests the file named ", { code: file }, " in that folder. Each key box reaches the file as ",
+      { code: "BRUE_CRED_" }, " and the box's key in capitals: if you change the file's key boxes, " +
+      "change those names in the command (a username box is ", { code: "BRUE_CRED_USERNAME" }, ").",
+      win ? " The keys it sets stay in that PowerShell window until you close it." : "",
+      ` Adapters run here with Python ${g.python_version}.`],
+  };
+}
+
+/* The command onto the clipboard. Where the page may not write there (a
+   browser on a plain http address that is not this computer), the command
+   is selected instead, for the keyboard's own copy. */
+function csCopyCommand(text, codeEl, btn) {
+  const said = (word) => {
+    btn.textContent = word;
+    setTimeout(() => { btn.textContent = "Copy"; }, 1500);
+  };
+  const select = () => {
+    try { window.getSelection().selectAllChildren(codeEl); } catch (e) { /* nothing to select with */ }
+    said("Selected");
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).then(() => said("Copied"), select);
+  } else {
+    select();
+  }
+}
+
+function csTestBlock(g) {
+  const box = document.createElement("div");
+  box.className = "cs-test";
+  const t = csTestHelp(g);
+  if (!t) {
+    const wait = document.createElement("div");
+    wait.className = "cs-note";
+    wait.textContent = "Reading this computer's Python…";
+    box.appendChild(wait);
+    return box;
+  }
+  if (t.none) {
+    const no = document.createElement("div");
+    no.className = "cs-note cs-said";
+    no.id = "cs-test-none";
+    no.textContent = t.none;
+    box.appendChild(no);
+    return box;
+  }
+  const list = document.createElement("ol");
+  list.className = "cs-devsteps";
+  for (const line of t.steps) {
+    const li = document.createElement("li");
+    li.textContent = line;
+    list.appendChild(li);
+  }
+  // The command in a well, Copy in its corner.
+  const row = document.createElement("div");
+  row.className = "cs-testrow";
+  const code = document.createElement("code");
+  code.className = "cs-testcmd";
+  code.id = "cs-test-cmd";
+  code.textContent = t.cmd;                 // text only: it holds paths
+  const copy = document.createElement("button");
+  copy.className = "cs-copy";
+  copy.id = "cs-test-copy";
+  copy.textContent = "Copy";
+  copy.onclick = () => csCopyCommand(t.cmd, code, copy);
+  row.append(code, copy);
+  const note = document.createElement("p");
+  note.className = "cs-devnote";
+  for (const part of t.note) {
+    if (!part) continue;
+    if (typeof part === "string") note.appendChild(document.createTextNode(part));
+    else {
+      const c = document.createElement("code");
+      c.textContent = part.code;
+      note.appendChild(c);
+    }
+  }
+  box.append(list, row, note);
+  return box;
+}
+
+function csAddBrokerRow() {
+  const wrap = document.createElement("div");
+  wrap.className = "cs-brow cs-add" + (connScreen.addOpen ? " open" : "");
+  // The row's face: a + in the house green, what it is, and one line saying
+  // what it is for. It reads as an action, not as a footnote.
+  const head = document.createElement("button");
+  head.className = "cs-addhead";
+  head.id = "cs-add-open";
+  const plus = document.createElement("span");
+  plus.className = "cs-addplus";
+  plus.textContent = "+";
+  const hmid = document.createElement("span");
+  hmid.className = "cs-addheadmid";
+  const htitle = document.createElement("span");
+  htitle.className = "cs-addtitle";
+  htitle.textContent = "Add your own broker";
+  const hsub = document.createElement("span");
+  hsub.className = "cs-addsub";
+  hsub.textContent = "Connect a broker we don't list, with your own API keys.";
+  hmid.append(htitle, hsub);
+  const caret = document.createElement("span");
+  caret.className = "cs-pickcaret";
+  head.append(plus, hmid, caret);
+  head.onclick = (ev) => {
+    ev.stopPropagation();
+    connScreen.addOpen = !connScreen.addOpen;
+    connScreen.addError = null;
+    // The cursor waits for step 2 until step 1 is done: the first thing to do is step 1's.
+    connScreen.addFocus = connScreen.addOpen && (connScreen.addSaved || connScreen.addDownloaded) ? "name" : "";
+    // An engine that did not answer is asked again when the card reopens.
+    if (connScreen.addOpen && connScreen.ownGuide && connScreen.ownGuide.failed) {
+      connScreen.ownGuide = undefined;
+    }
+    renderConnScreen(true);
+  };
+  wrap.appendChild(head);
+  if (!connScreen.addOpen) return wrap;
+
+  const card = document.createElement("div");
+  card.className = "cs-bcard cs-bcard-in cs-addcard";
+
+  const err = document.createElement("div");
+  err.className = "cs-err hidden";
+  err.id = "cs-add-err";
+  const tail = document.createElement("div");
+  tail.className = "cs-errtail hidden";
+  tail.id = "cs-add-stderr";
+  const showError = (e) => {
+    if (!e) return;
+    err.textContent = e.message;       // the adapter's own words: text only
+    err.classList.remove("hidden");
+    if (e.stderr) {
+      tail.textContent = e.stderr;
+      tail.classList.remove("hidden");
+    }
+  };
+
+  if (connScreen.linkOld) {
+    // The interface can be newer than the engine it talks to. Nothing typed
+    // here could be sent anywhere, so the only control is the fix.
+    const old = document.createElement("div");
+    old.className = "cs-bupd";
+    old.textContent = "This terminal's engine is older than its interface. " +
+                      "Update the terminal to add your own broker.";
+    const acts = document.createElement("div");
+    acts.className = "cs-bactions";
+    const upd = document.createElement("button");
+    upd.className = "cs-connect";
+    upd.textContent = "Update terminal";
+    upd.onclick = () => startAppUpdate();
+    acts.appendChild(upd);
+    card.append(old, acts);
+    wrap.appendChild(card);
+    return wrap;
+  }
+
+  // The brokers this terminal ships an adapter for are rows of their own at
+  // the top of the list (csExampleRow); this door is for an adapter the user
+  // brings: a broker we do not ship yet, or their own program. Three numbered
+  // steps, each a title, one or two plain sentences and its one action; the
+  // developers' test sits folded at the foot.
+  const g = connScreen.ownGuide;
+  const plat = (g && g.platform) || "";
+  const win = plat ? plat === "win32" : /win/i.test(navigator.platform || "");
+  const mac = plat ? plat === "darwin" : /mac/i.test(navigator.platform || "");
+  const para = (text, cls) => {
+    const el = document.createElement("p");
+    el.className = cls || "cs-steptext";
+    el.textContent = text;
+    return el;
+  };
+  const steps = document.createElement("ol");
+  steps.className = "cs-steps";
+  const started = !!(connScreen.addSaved || connScreen.addDownloaded);
+  const stepState = (n) => (n === 1 ? (started ? "done" : "current")
+                            : n === 2 ? (started ? "current" : "") : "");
+  const step = (n, title, ...body) => {
+    const li = document.createElement("li");
+    const st = stepState(n);
+    li.className = "cs-step" + (st ? " " + st : "");
+    const num = document.createElement("span");
+    num.className = "cs-stepnum";
+    num.textContent = st === "done" ? "\u2713" : String(n);
+    const main = document.createElement("div");
+    main.className = "cs-stepmain";
+    const t = document.createElement("div");
+    t.className = "cs-steptitle";
+    t.textContent = title;
+    main.append(t, ...body);
+    li.append(num, main);
+    steps.appendChild(li);
+  };
+
+  // 1. The starter file, and the walkthrough's full steps beside it. The
+  // download is a plain link with `download`: a browser saves it, and in the
+  // desktop window it meets Electron's default for a download with no
+  // will-download handler, a Save dialog (desktop/main.js sets none). Same
+  // window, so the shell's new-window handler is not involved.
+  const dlRow = document.createElement("div");
+  dlRow.className = "cs-steprow";
+  const savedTo = connScreen.addSaved;
+  if (g && g.template === false) {
+    dlRow.appendChild(para("This terminal's kit has no starter adapter. Update the terminal.",
+                           "cs-steptext cs-stepwarn"));
+  } else if (savedTo) {
+    // Created: where it is, and the way to it.
+    const where = document.createElement("div");
+    where.className = "cs-saved";
+    where.id = "cs-add-saved";
+    const lab = document.createElement("span");
+    lab.textContent = savedTo.existing ? "Already in your folder:" : "Saved to:";
+    const code = document.createElement("code");
+    code.textContent = String(savedTo.path || "");
+    where.append(lab, code);
+    const reveal = document.createElement("button");
+    reveal.className = "cs-btn cs-btn-ghost";
+    reveal.id = "cs-add-reveal";
+    reveal.textContent = "Open folder";
+    reveal.onclick = async () => {
+      reveal.disabled = true;
+      try {
+        const r = await fetch("/api/broker/template/reveal", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || "HTTP " + r.status);
+      } catch (e) {
+        connScreen.addError = { message: "The folder could not be opened here (" + String(e.message || e) +
+                                         "). The file is at the path shown." };
+        renderConnScreen(true);
+        return;
+      }
+      reveal.disabled = false;
+    };
+    dlRow.append(where, reveal);
+  } else {
+    const make = document.createElement("button");
+    make.className = "cs-btn cs-btn-primary";
+    make.id = "cs-add-make";
+    make.textContent = "Create my starter adapter";
+    make.onclick = async () => {
+      make.disabled = true;
+      make.textContent = "Creating\u2026";
+      try {
+        const r = await fetch("/api/broker/template/save", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+        const body = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(body.detail || "HTTP " + r.status);
+        connScreen.addSaved = body;
+        if (!String(connScreen.addDraft.path || "").trim()) connScreen.addDraft.path = String(body.path || "");
+        connScreen.addFocus = "name";
+      } catch (e) {
+        connScreen.addError = { message: "The starter adapter could not be created: " + String(e.message || e) };
+      }
+      renderConnScreen(true);
+    };
+    const dl = document.createElement("a");
+    dl.className = "cs-steplink cs-steplink-plain";
+    dl.id = "cs-add-template";
+    dl.href = "/api/broker/template";
+    dl.setAttribute("download", "my_broker_adapter.py");
+    dl.textContent = "or download it";
+    dl.addEventListener("click", () => {
+      connScreen.addDownloaded = true;
+      setTimeout(() => renderConnScreen(true), 400);
+    });
+    dlRow.append(make, dl);
+  }
+  const how = document.createElement("a");
+  how.className = "cs-steplink";
+  how.id = "cs-add-how";
+  how.href = "#" + CS_GUIDE_ID;
+  how.textContent = "Read the step-by-step guide";
+  how.onclick = (ev) => {
+    ev.preventDefault();
+    closeConnScreen();
+    gdOpenAt(CS_GUIDE_ID);
+  };
+  const guideRow = document.createElement("div");
+  guideRow.className = "cs-steprow";
+  guideRow.appendChild(how);
+  step(1, "Get the starter adapter",
+       para(savedTo ? "It is ready, and step 2 already points at it."
+                    : "A starter file that links the terminal to a broker. It runs on practice prices " +
+                      "straight away, so you can try every step before it is set up for your broker."),
+       dlRow, guideRow);
+
+  // 2. Name it and point the terminal at the file.
+  const form = document.createElement("div");
+  form.className = "cs-form cs-addform";
+  const draft = connScreen.addDraft;
+  const submit = () => {
+    const bad = csValidateOwnBroker(draft, csTakenIds());
+    if (bad) {
+      connScreen.addError = { message: bad.message };
+      connScreen.addFocus = bad.field;
+      renderConnScreen(true);
+      return;
+    }
+    const body = { name: csSlug(draft.name), description: draft.name.trim(),
+                   python_file: csCleanPath(draft.path) };
+    const args = csSplitArgs(draft.args);
+    if (args.length) body.args = args;
+    csSubmitLink(body);
+  };
+  const field = (key, label, placeholder, hint, into) => {
+    const lab = document.createElement("label");
+    lab.className = "cs-field";
+    const cap = document.createElement("span");
+    cap.className = "cs-fieldlabel";
+    cap.textContent = label;
+    const inp = document.createElement("input");
+    inp.type = "text";
+    inp.autocomplete = "off";
+    inp.spellcheck = false;
+    inp.placeholder = placeholder;
+    inp.dataset.csField = key;
+    inp.value = draft[key] || "";
+    inp.disabled = connScreen.addBusy;
+    inp.addEventListener("keydown", (e) => { if (e.key === "Enter") submit(); });
+    lab.append(cap, inp);
+    if (hint) lab.appendChild(hint);
+    (into || form).appendChild(lab);
+    return inp;
+  };
+  const idHint = document.createElement("span");
+  idHint.className = "cs-fhelp";
+  idHint.id = "cs-add-id";
+  const showId = () => {
+    const id = csSlug(draft.name);
+    idHint.textContent = id ? `Shown in your list of brokers, saved on this computer as ${id}.`
+                            : "Shown in your list of brokers.";
+  };
+  let go = null;
+  const ready = () => !!(String(draft.name || "").trim() && String(draft.path || "").trim());
+  const nameIn = field("name", "Broker name", "e.g. Acme Markets", idHint);
+  nameIn.oninput = () => { draft.name = nameIn.value; showId(); if (go) go.disabled = connScreen.addBusy || !ready(); };
+  const pathHint = document.createElement("span");
+  pathHint.className = "cs-fhelp";
+  pathHint.textContent = savedTo
+    ? "Filled in for you: the file step 1 created."
+    : "Step 1 fills this in. Downloaded the file instead? " + (win
+      ? "In File Explorer, right-click it, choose \u201cCopy as path\u201d and paste it here."
+      : mac
+        ? "In Finder, hold Option, right-click it, choose \u201cCopy as Pathname\u201d and paste it here."
+        : "Paste its full path here.");
+  // A pasted path: the desktop shell has no file dialog to offer, and a
+  // browser file input does not reveal where a file lives.
+  const pathIn = field("path", "Adapter file", "No file yet", pathHint);
+  pathIn.oninput = () => { draft.path = pathIn.value; if (go) go.disabled = connScreen.addBusy || !ready(); };
+  // Arguments are for an adapter that takes them; the starter takes none.
+  const more = document.createElement("details");
+  more.className = "cs-more";
+  if (draft.args) more.open = true;
+  const moreSum = document.createElement("summary");
+  moreSum.textContent = "More options";
+  more.appendChild(moreSum);
+  const argsHint = document.createElement("span");
+  argsHint.className = "cs-fhelp";
+  argsHint.textContent = "Words the terminal passes to the adapter when it starts it. The starter needs none.";
+  const argsIn = field("args", "Arguments", "none needed for the starter adapter", argsHint, more);
+  argsIn.oninput = () => { draft.args = argsIn.value; };
+  form.appendChild(more);
+  showId();
+
+  const acts = document.createElement("div");
+  acts.className = "cs-steprow";
+  go = document.createElement("button");
+  go.className = "cs-btn cs-btn-primary";
+  go.id = "cs-add-go";
+  go.textContent = connScreen.addBusy ? "Testing\u2026" : "Test and add";
+  go.disabled = connScreen.addBusy || !ready();
+  go.onclick = submit;
+  const cancel = document.createElement("button");
+  cancel.className = "cs-btn cs-btn-ghost";
+  cancel.textContent = "Cancel";
+  cancel.disabled = connScreen.addBusy;
+  cancel.onclick = () => {
+    connScreen.addOpen = false;
+    connScreen.addError = null;
+    renderConnScreen(true);
+  };
+  acts.append(go, cancel);
+  step(2, "Add it to the terminal",
+       para("Name it and point the terminal at the file. The terminal runs the file once " +
+            "to check it before adding it."),
+       form, acts, err, tail);
+
+  // 3. What comes next happens on the new row, not here.
+  const live = document.createElement("a");
+  live.className = "cs-steplink";
+  live.href = "#" + CS_GUIDE_ID;
+  live.textContent = "Set it up for your broker";
+  live.onclick = (ev) => { ev.preventDefault(); closeConnScreen(); gdOpenAt(CS_GUIDE_ID); };
+  const liveRow = document.createElement("div");
+  liveRow.className = "cs-steprow";
+  liveRow.appendChild(live);
+  step(3, "Connect",
+       para("It appears in your list of brokers above. Open it, type your API key and " +
+            "secret, and press Connect. Until the file is set up for your broker it only " +
+            "uses practice prices, so any key works for a test."),
+       liveRow);
+  card.appendChild(steps);
+
+  // For developers: the kit's test of an adapter, run on this computer.
+  const dev = document.createElement("details");
+  dev.className = "cs-dev";
+  dev.id = "cs-dev";
+  dev.open = !!connScreen.devOpen;       // the card is rebuilt on every repaint
+  dev.ontoggle = () => { connScreen.devOpen = dev.open; };
+  const devSum = document.createElement("summary");
+  devSum.textContent = "For developers: test your adapter on this computer";
+  dev.append(devSum, csTestBlock(g));
+  card.appendChild(dev);
+  csLoadOwnGuide();          // asked once per run; repaints this card when answered
+
+  showError(connScreen.addError);
+  wrap.appendChild(card);
+  return wrap;
+}
+
+/* Unlink a broker the user linked: confirm, disconnect, remove the profile
+   and its saved keys, and move anything that was pointed at it somewhere that
+   still exists. Only ever offered on a row the hub marks `registered`. */
+async function csUnlinkBroker(key, hub) {
+  const name = brokerDisplayName(hub);
+  // a request out or held on it: asked first (tpxHeldAsk), then the unlink's own question
+  if (!(await tpxHeldAsk(key, "Unlink"))) return;
+  const ok = await askConfirm(
+    `Unlink ${name} (${key})? It is disconnected and its saved keys on this ` +
+    `machine are removed. The adapter file itself is not touched.`,
+    "Unlink", "Cancel");
+  if (!ok) return;
+  const wasSource = state.provider === "broker:" + key;
+  // The ticket leaves first, the same way Disconnect does it, so it never
+  // sits on a broker that is about to stop existing.
+  if (hub && hub.connected) await brokerDisconnect(key);
+  let r;
+  try {
+    r = await fetch("/api/broker/unlink", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: key, forget: true }),
+    });
+  } catch (e) { r = null; }
+  if (!r || !r.ok) {
+    const out = r ? await readResult(r) : {};
+    const old = r && (r.status === 405
+      || (r.status === 404 && (!out.detail || out.detail === "Not Found")));
+    connScreen.errors[key] = {
+      message: old
+        ? "This terminal's engine is older than its interface. Update the terminal to unlink a broker."
+        : String(out.detail || "The broker could not be unlinked."),
+    };
+    await refreshConnScreen();
+    renderConnScreen(true);
+    return;
+  }
+  delete connScreen.notes[key];
+  delete connScreen.errors[key];
+  delete connScreen.keysOpen[key];
+  csDraftDrop(key);
+  connScreen.broker = "";
+  try { await refreshProviders(); } catch (e) { /* the list below still repaints */ }
+  if (wasSource) enterLiveSource(state.lastDataProvider || "lse");
+  await refreshConnScreen();
+  renderConnScreen(true);
+}
+
+/* Forget the keys saved for a broker. Its own action with its own question:
+   a stored key is never deleted as a side effect of anything else. */
+async function csForgetKeys(key, name) {
+  // a request out or held on it: asked first (tpxHeldAsk), then the forget's own question
+  if (!(await tpxHeldAsk(key, "Forget"))) return;
+  const ok = await askConfirm(
+    `Forget the keys saved for ${name}? They are deleted from this machine ` +
+    `and it is disconnected.`, "Forget keys", "Cancel");
+  if (!ok) return;
+  try {
+    // An empty object WITHOUT merge is the engine's "forget everything".
+    const r = await fetch("/api/broker/credentials", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ broker: key, values: {} }),
+    });
+    if (!r.ok) throw new Error((await readResult(r)).detail || r.status);
+    delete connScreen.errors[key];
+    connScreen.notes[key] = "Keys forgotten.";
+  } catch (e) {
+    connScreen.errors[key] = { message: String(e.message || e) };
+  }
+  delete connScreen.keysOpen[key];
+  csDraftDrop(key);
+  if (typeof tpb !== "undefined" && tpb.broker === key) await brokerDisconnect(key);
+  await refreshConnScreen();
+  renderConnScreen(true);
 }
 
 function csLseCard() {
@@ -1623,6 +4096,9 @@ function csLseCard() {
     + '<line x1="128" y1="122" x2="128" y2="162"/>'
     + '<rect x="108" y="58" width="40" height="64" rx="7" stroke="none"/></g>'
     + '</svg>';
+  const tile = document.createElement("span");
+  tile.className = "cs-tile";
+  tile.appendChild(dot);
   const mid = document.createElement("div");
   mid.className = "cs-lse-mid";
   const name = document.createElement("div");
@@ -1630,7 +4106,7 @@ function csLseCard() {
   name.textContent = "London Strategic Edge";
   const st = document.createElement("div");
   st.className = "cs-lse-state";
-  st.textContent = state.lseConfigured ? "key set · live · your LSE key" : "no key connected";
+  st.textContent = state.lseConfigured ? "Key set \u00b7 live \u00b7 your LSE key" : "No key connected";
   mid.append(name, st);
   const act = document.createElement("div");
   act.className = "cs-lse-act";
@@ -1638,18 +4114,28 @@ function csLseCard() {
   // to sit here opened the LSE demo ACCOUNT, which is a trading decision in the
   // middle of the data section; that account is now a row under BROKERS with
   // every other venue, so each section does one thing.
-  const useBtn = document.createElement("button");
   const inUse = state.provider === "lse";
-  useBtn.textContent = inUse ? "In use" : "Use";
-  useBtn.disabled = !state.lseConfigured || inUse;
-  useBtn.onclick = () => { closeConnScreen(); enterLiveSource("lse"); };
+  if (state.lseConfigured && inUse) {
+    const pill = document.createElement("span");
+    pill.className = "cs-pill ok";
+    pill.textContent = "In use";
+    act.appendChild(pill);
+  } else if (state.lseConfigured) {
+    const useBtn = document.createElement("button");
+    useBtn.className = "cs-act";
+    useBtn.textContent = "Use";
+    useBtn.onclick = () => { closeConnScreen(); enterLiveSource("lse"); };
+    act.appendChild(useBtn);
+  }
   const keyBtn = document.createElement("button");
+  keyBtn.className = state.lseConfigured ? "cs-act" : "cs-act primary";
   keyBtn.textContent = state.lseConfigured ? "Change key" : "Add key";
-  act.append(useBtn, keyBtn);
+  act.appendChild(keyBtn);
   if (state.lseConfigured) {
     // Total sign-out: key, live data and the demo account that comes with
     // the key leave together; the view restarts as a no-key boot.
     const outBtn = document.createElement("button");
+    outBtn.className = "cs-act";
     outBtn.textContent = "Sign out";
     outBtn.onclick = async () => {
       outBtn.disabled = true;
@@ -1658,15 +4144,13 @@ function csLseCard() {
     };
     act.append(outBtn);
   }
-  row.append(dot, mid, act);
+  row.append(tile, mid, act);
 
   const keyline = document.createElement("div");
   keyline.className = "cs-keyline hidden";
-  const input = document.createElement("input");
-  input.type = "password";
+  // a key box no browser offers to save (csSecretBox)
+  const input = csSecretBox(document.createElement("input"));
   input.placeholder = "lse_live_...";
-  input.autocomplete = "off";
-  input.spellcheck = false;
   const save = document.createElement("button");
   save.textContent = "Save";
   keyline.append(input, save);
@@ -1704,21 +4188,18 @@ function csLseCard() {
    without pretending it is connectable today.
    Deliberately NOT a card: one dim line under the section, no border,
    no button. */
-function csComingSoonRow(text) {
-  const el = document.createElement("div");
-  el.className = "cs-soon";
-  el.textContent = text;
-  return el;
-}
 
 /* The commercial door, bottom right of the whole screen:
    the one red thing on the surface, one word. Opens the broker inquiry form. */
 function csInquireFoot() {
   const foot = document.createElement("div");
   foot.id = "cs-foot";
+  // For a broker FIRM that wants to be listed (the form asks for the firm,
+  // its regulator and a work email), said in words, in this screen's link
+  // style, rather than one orange word in capitals.
   const btn = document.createElement("button");
   btn.id = "inq-open";
-  btn.textContent = "Inquire";
+  btn.textContent = "Are you a broker? Ask to be listed";
   btn.onclick = openInquiry;
   foot.appendChild(btn);
   return foot;
@@ -1801,7 +4282,8 @@ function csBrokerCard(d, hub, opts) {
   // images" habit is relaxed: the logos are exactly the colour the neutral
   // chrome deliberately lacks.
   const logoSrc = (d && d.logo)
-    || (d && d.logo_url && connScreen.origin ? connScreen.origin + d.logo_url : null);
+    || (d && d.logo_url && connScreen.origin ? connScreen.origin + d.logo_url : null)
+    || csExampleLogo({ hub }) || null;
   if (logoSrc) {
     const img = document.createElement("img");
     img.alt = "";
@@ -1851,10 +4333,43 @@ function csBrokerCard(d, hub, opts) {
     card.appendChild(meta);
   }
 
+  // What happened on this card last, in one line (a link that just
+  // succeeded, keys just forgotten). Ours, or built from sanitised handshake
+  // fields; text either way.
+  const own = !!(hub && hub.registered);
+  if (connScreen.notes[key]) {
+    const n = document.createElement("div");
+    n.className = "cs-note cs-said";
+    n.textContent = connScreen.notes[key];
+    card.appendChild(n);
+  }
+  if (own && Array.isArray(hub.command_preview) && hub.command_preview.length) {
+    // What will be run on this machine when this broker is connected: the
+    // argument list as the engine spawns it. The user linked a program, so
+    // the program is shown.
+    const cmd = document.createElement("div");
+    cmd.className = "cs-bmeta cs-cmd";
+    cmd.textContent = "Runs " + hub.command_preview.map(
+      (a) => (/[\s"]/.test(a) || a === "" ? JSON.stringify(a) : a)).join(" ");
+    card.appendChild(cmd);
+  }
+
   // A broker that shows an access note instead of a form (fixed demo creds,
   // self-registration) says so inline.
-  const fields = (d && Array.isArray(d.credential_form)) ? d.credential_form : [];
-  const realFields = fields.filter((f) => f && f.type !== "none");
+  // The fields to type come from the directory listing when there is one,
+  // else from the hub row, which carries the form the adapter's OWN handshake
+  // declared (SPEC 3.2). That second source is what gives a broker the user
+  // linked themselves a key form at all.
+  const fields = (d && Array.isArray(d.credential_form)) ? d.credential_form
+    : (hub && Array.isArray(hub.credential_form)) ? hub.credential_form : [];
+  const realFields = fields.filter((f) => f && f.key && f.type !== "none");
+  // Which fields already hold a value on this machine: NAMES only, from the
+  // engine. null with an engine too old to say, where the form falls back to
+  // its previous behaviour.
+  const stored = hub && Array.isArray(hub.stored_credentials)
+    ? new Set(hub.stored_credentials) : null;
+  const allStored = !!stored && realFields.length > 0
+    && realFields.every((f) => stored.has(f.key));
   const accessNote = d && d.extra && d.extra.access_note;
   if (accessNote && !realFields.length) {
     const note = document.createElement("div");
@@ -1871,7 +4386,7 @@ function csBrokerCard(d, hub, opts) {
   if (extra.welcome) {
     const w = document.createElement("div");
     w.className = "cs-note";
-    w.textContent = String(extra.welcome).slice(0, 160);
+    w.textContent = oneLine(extra.welcome);
     card.appendChild(w);
   }
   const support = String(extra.support || "");
@@ -1885,10 +4400,57 @@ function csBrokerCard(d, hub, opts) {
     card.appendChild(s);
   }
 
+  // A profile linked from a row this terminal lists keeps that row's help
+  // beside its boxes until it is connected (csKeysHelp): where to make the
+  // key, and on one row who may not use its broker's API. It used to go with
+  // the row on the very press that linked it, the one an ineligible key is
+  // refused on.
+  const keysHelp = connected ? null : csKeysHelp(csListedRow(hub));
+  if (keysHelp) card.appendChild(keysHelp);
+
   // Credential form: built from the directory's field descriptors, hidden until
   // the user presses Connect on a broker that has one.
+  // Saved keys are stated, never shown: which fields hold a value, with the
+  // two things a person may want to do about it. A stored key is changed by
+  // typing a new one and deleted only by "Forget keys".
+  if (stored && stored.size && !connected) {
+    const labels = [...stored].map((k) => {
+      const f = realFields.find((x) => x.key === k);
+      return (f && f.label) || k;
+    });
+    const line = document.createElement("div");
+    line.className = "cs-saved";
+    const txt = document.createElement("span");
+    txt.textContent = `Saved on this machine: ${labels.join(", ")}.`;
+    line.appendChild(txt);
+    if (realFields.length) {
+      const chg = document.createElement("button");
+      chg.className = "cs-quiet";
+      chg.textContent = connScreen.keysOpen[key] ? "Hide" : "Change";
+      chg.onclick = () => {
+        connScreen.keysOpen[key] = !connScreen.keysOpen[key];
+        renderConnScreen(true);
+      };
+      line.appendChild(chg);
+    }
+    const fg = document.createElement("button");
+    fg.className = "cs-quiet";
+    fg.dataset.act = "forget";
+    fg.textContent = "Forget keys";
+    fg.onclick = () => csForgetKeys(key, label);
+    line.appendChild(fg);
+    card.appendChild(line);
+  }
+
+  // The boxes are ON SCREEN whenever this card is open and there is something
+  // to type: a field with no saved value, or the user pressed Change. They
+  // used to stay hidden until Connect was pressed once, so that first press
+  // only revealed them and sent nothing, which read as a button that did
+  // nothing; and text typed before it went nowhere at all.
+  const showForm = !connected && realFields.length > 0
+    && (!allStored || !!connScreen.keysOpen[key]);
   const form = document.createElement("div");
-  form.className = "cs-form hidden";
+  form.className = "cs-form" + (showForm ? "" : " hidden");
   const inputs = {};
   for (const f of realFields) {
     const lab = document.createElement("label");
@@ -1900,9 +4462,21 @@ function csBrokerCard(d, hub, opts) {
       lab.appendChild(h);
     }
     const inp = document.createElement("input");
-    inp.type = f.type === "password" ? "password" : "text";
+    // a hidden field is a key box no browser offers to save (csSecretBox)
+    if (f.type === "password") csSecretBox(inp);
+    else inp.type = "text";
     inp.autocomplete = "off";
     inp.spellcheck = false;
+    inp.dataset.cred = f.key;
+    // The name the rebuild finds this box by, to give it back its focus and
+    // caret (renderConnScreen). Only set, never read as markup.
+    inp.dataset.csField = "cred:" + key + ":" + f.key;
+    // What has been typed and not yet submitted comes back after a repaint
+    // (csDraft). A STORED value is never put back in the box: the box says it
+    // is saved and that leaving it empty keeps it.
+    inp.value = csDraft(key, f.key);
+    inp.oninput = () => csDraftSet(key, f.key, inp.value);
+    if (stored && stored.has(f.key)) inp.placeholder = "saved · leave blank to keep";
     lab.appendChild(inp);
     inputs[f.key] = inp;
     form.appendChild(lab);
@@ -1911,6 +4485,56 @@ function csBrokerCard(d, hub, opts) {
 
   const err = document.createElement("div");
   err.className = "cs-err hidden";
+  // Why the last attempt on this card failed, kept across repaints: what the
+  // page itself caught, else what the engine remembers of the last failed
+  // connect (the broker's own message, and for the user's own adapter the
+  // end of its stderr, where a traceback lives). Both are text.
+  const errTail = document.createElement("div");
+  errTail.className = "cs-errtail hidden";
+  const failed = connected ? null
+    : (connScreen.errors[key] || (hub && hub.last_error) || null);
+  // Beside a refusal: which of the broker's boxes hold nothing, typed or
+  // saved. The broker's sentence may speak of variable names; this speaks of
+  // the boxes on this card.
+  const errEmpty = document.createElement("div");
+  errEmpty.className = "cs-empty hidden";
+  if (failed && failed.message) {
+    const more = failed.stderr || (hub && hub.last_error && hub.last_error.stderr) || "";
+    err.textContent = csFailText(failed.message, more);
+    err.classList.remove("hidden");
+    if (more) {
+      errTail.textContent = more;
+      errTail.classList.remove("hidden");
+    }
+    const drafts = connScreen.keyDrafts[key] || {};
+    const empty = failed.required ? [] : csEmptyFields(realFields, drafts, stored);
+    if (empty.length) {
+      errEmpty.textContent = "Left empty: " + empty.map((f) => f.label || f.key).join(", ") + ".";
+      errEmpty.classList.remove("hidden");
+    }
+  }
+  // What the adapter printed (the engine's `printed`: its stray output and
+  // the end of its stderr, its runs' latest last), kept for this card while
+  // it is connected and after a run that ended with no failure to show; a
+  // failed connect shows its own lines under its sentence instead. A
+  // data_local_only adapter's lines go nowhere else, and the engine's own
+  // log says this card shows them. Text, folded: the evidence, not the news.
+  // The fold is there, hidden, before the first line, so the watch tick can
+  // put new lines in it without repainting the card (csPrintedRefresh).
+  let printedFold = null;
+  if (!(failed && failed.message) && hub) {
+    printedFold = document.createElement("details");
+    printedFold.className = "cs-more cs-printed" + (hub.printed ? "" : " hidden");
+    printedFold.dataset.csPrinted = hub.broker || key;
+    printedFold.open = !!connScreen.printedOpen[key];
+    printedFold.addEventListener("toggle", () => { connScreen.printedOpen[key] = printedFold.open; });
+    const sum = document.createElement("summary");
+    sum.textContent = "Lines the adapter printed";
+    const lines = document.createElement("div");
+    lines.className = "cs-errtail";
+    lines.textContent = String(hub.printed || "");
+    printedFold.append(sum, lines);
+  }
 
   // Every account the login reaches, always visible once we know them: which
   // one your orders land on is the most consequential fact on this card, so
@@ -1919,17 +4543,63 @@ function csBrokerCard(d, hub, opts) {
   const accounts = (hub && hub.accounts) || [];
   if (accounts.length) {
     const bound = hub.account_id || "";
+    // Three kinds of list. Connected: the switch (the one in use marked).
+    // Waiting on the chooser the engine asked for (needs_account): the
+    // chooser. Otherwise, before Connect: the accounts this login reached
+    // when it was last connected, as information, not as controls. Shown
+    // as buttons there, a click on one right after Connect was lost when
+    // Connect repainted the card, or read as a choice of account.
+    const choosing = !connected && !!hub.needs_account;
+    const live = connected || choosing;
     const pick = document.createElement("div");
-    pick.className = "cs-accts";
+    pick.className = "cs-accts" + (live ? "" : " cs-accts-info");
     const head = document.createElement("div");
     head.className = "cs-accts-label";
     head.textContent = bound
       ? `Accounts (${accounts.length})`
-      : `Select an account (${accounts.length})`;
+      : `${live ? "Select an account" : "Accounts"} (${accounts.length})`;
     pick.appendChild(head);
+    if (!live) {
+      const n = document.createElement("div");
+      n.className = "cs-note";
+      n.textContent = bound
+        ? "Connect uses the account used last. Once connected, click another account to switch."
+        : "Press Connect, then choose one of them.";
+      pick.appendChild(n);
+    }
+    // The chooser's first click (the preview), kept across repaints of the
+    // screen, so the second click is the choice it was.
+    const previewed = live && connScreen.acctPreview ? connScreen.acctPreview[key] : undefined;
+    const preview = (b, a) => {
+      b.classList.add("chosen");
+      const pv = document.createElement("span");
+      pv.className = "cs-acct-preview";
+      pv.innerHTML =
+        `<span class="cs-acct-line">${csEsc(a.mode === "live"
+            ? "Real money. Orders must be armed before they are sent."
+            : "Demo money. Orders cost nothing.")}</span>`
+        + `<span class="cs-acct-go">Click again to ${bound ? "switch to" : "use"} this account</span>`;
+      b.appendChild(pv);
+    };
 
     for (const a of accounts) {
       const inUse = !!bound && a.id === bound;
+      if (!live) {
+        // information: the account, its words, and the one used last
+        const row = document.createElement("div");
+        row.className = "cs-acct cs-acct-info" + (a.mode === "live" ? " live" : " demo");
+        row.innerHTML =
+          `<span class="cs-acct-name">${csEsc(a.label || a.id)}</span>`
+          + `<span class="cs-acct-tags">`
+          + (inUse ? '<span class="cs-acct-last">Used last</span>' : "")
+          + `<span class="cs-acct-tag">${a.mode === "live" ? "LIVE" : "DEMO"}</span>`
+          + `</span>`
+          + `<span class="cs-acct-id">${csEsc(a.id)}`
+          + (a.type ? ` · ${csEsc(String(a.type).replace(/_/g, " "))}` : "")
+          + `</span>`;
+        pick.appendChild(row);
+        continue;
+      }
       const b = document.createElement("button");
       b.className = "cs-acct" + (a.mode === "live" ? " live" : " demo")
         + (inUse ? " inuse" : "");
@@ -1956,6 +4626,7 @@ function csBrokerCard(d, hub, opts) {
         pick.appendChild(b);
         continue;
       }
+      if (previewed === a.id) preview(b, a);
       b.onclick = async () => {
         // First click PREVIEWS, second commits. Which account your orders
         // land on is not a thing to change by accident, and the preview is
@@ -1966,24 +4637,22 @@ function csBrokerCard(d, hub, opts) {
             const p2 = x.querySelector(".cs-acct-preview");
             if (p2) p2.remove();
           });
-          b.classList.add("chosen");
-          const pv = document.createElement("span");
-          pv.className = "cs-acct-preview";
-          pv.innerHTML =
-            `<span class="cs-acct-line">${csEsc(a.mode === "live"
-                ? "Real money. Orders must be armed before they are sent."
-                : "Demo money. Orders cost nothing.")}</span>`
-            + `<span class="cs-acct-go">Click again to ${bound ? "switch to" : "use"} this account</span>`;
-          b.appendChild(pv);
+          preview(b, a);
+          if (connScreen.acctPreview) connScreen.acctPreview[key] = a.id;
           return;
         }
+        if (connScreen.acctPreview) delete connScreen.acctPreview[key];
         pick.querySelectorAll("button").forEach((x) => { x.disabled = true; });
         try {
-          const r = await fetch("/api/broker/account", {
-            method: "POST", headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ broker: key, account_id: a.id }),
-          });
-          if (!r.ok) throw new Error((await r.json()).detail || r.status);
+          // Asks first while a request is out or held on this broker, and
+          // points the ticket at the account once it is bound
+          // (csSwitchAccount). Not now switches nothing.
+          const done = await csSwitchAccount(key, a.id);
+          if (!done) {
+            // (the account in use stays disabled: nothing to decide there)
+            pick.querySelectorAll("button").forEach((x) => { x.disabled = x.classList.contains("inuse"); });
+            return;
+          }
           await refreshConnScreen(true);
         } catch (e2) {
           err.textContent = String(e2.message || e2);
@@ -1998,6 +4667,39 @@ function csBrokerCard(d, hub, opts) {
 
   const actions = document.createElement("div");
   actions.className = "cs-bactions";
+  if (connected && !brokerIsPaper(hub)) {
+    // Real money, connected. Whether this session may send it orders is the
+    // most consequential fact on the card after the account, so it is a
+    // sentence here, not a colour: allowed, or read-only with the one button
+    // that changes it. The engine holds the rule (an unarmed broker's orders
+    // come back refused); this is where the user's decision is taken to it.
+    const tr = document.createElement("div");
+    tr.className = "cs-trade" + (hub.armed ? " armed" : "");
+    const say = document.createElement("span");
+    say.textContent = hub.armed
+      ? "LIVE. Trading is allowed for this session."
+      : "LIVE, connected read-only. Orders are refused until you allow trading.";
+    tr.appendChild(say);
+    if (!hub.armed) {
+      const allow = document.createElement("button");
+      allow.className = "cs-connect";
+      allow.dataset.act = "arm";
+      allow.textContent = "Allow trading";
+      allow.onclick = async () => {
+        const yes = await askConfirm(
+          brokerLiveQuestion(hub).replace(/Connect and allow trading\?$/, "Allow trading?"),
+          "Allow trading", "Not now", hub.terms);
+        if (!yes) return;
+        allow.disabled = true;
+        const armed = await brokerArm(key);
+        if (!armed) connScreen.errors[key] = { message: "The engine did not arm this broker. Reconnect and try again." };
+        await refreshConnScreen();
+        renderConnBar();
+      };
+      tr.appendChild(allow);
+    }
+    card.appendChild(tr);
+  }
   if (connected) {
     // "Use" points the MARKETS page at this venue: its instruments become the
     // watchlist and its prices become the chart, which is what you want to be
@@ -2010,7 +4712,14 @@ function csBrokerCard(d, hub, opts) {
       const use = document.createElement("button");
       use.textContent = state.provider === src.name ? "In use" : "Use";
       use.disabled = state.provider === src.name;
-      use.onclick = () => { closeConnScreen(); enterLiveSource(src.name); };
+      // The forward action is black like every action on this screen; "In
+      // use" is a status, the same inverted pill as the LSE row's.
+      use.className = use.disabled ? "cs-inuse" : "cs-primary";
+      // Then MARKETS, as its own tab does it: Use pressed while another page
+      // was showing (the walkthrough's "Add your own broker" steps send you
+      // here from it) left that page on screen beside the chart. The source
+      // is already this venue, so the tab only shows it and loads nothing.
+      use.onclick = () => { closeConnScreen(); enterLiveSource(src.name); $("rail-markets").click(); };
       actions.appendChild(use);
     }
     // No "Switch account" button: every account is listed above with the one
@@ -2020,6 +4729,8 @@ function csBrokerCard(d, hub, opts) {
     const off = document.createElement("button");
     off.textContent = "Disconnect";
     off.onclick = async () => {
+      // a request out or held on it: asked first (tpxHeldAsk)
+      if (!(await tpxHeldAsk(key, "Disconnect"))) return;
       off.disabled = true;
       // Leaving the venue must not strand the markets page on a source that
       // no longer exists; fall back to the data connection it came from.
@@ -2027,12 +4738,30 @@ function csBrokerCard(d, hub, opts) {
       await brokerDisconnect(key);
       await refreshProviders();
       if (wasHere) enterLiveSource(state.lastDataProvider || "lse");
+      // Its row stays open with Connect in it. It was open only because it
+      // was connected, so it used to close here, and "Disconnect, then
+      // Connect" (the walkthrough's step after editing an adapter) meant
+      // finding the row and opening it again.
+      connScreen.broker = key;
+      connScreen.brokerPinned = true;
       await refreshConnScreen();
     };
     actions.appendChild(off);
   } else if (hub && hub.needs_account && (hub.accounts || []).length) {
     // The chooser IS the action. A Connect button beside it offers a second,
     // vaguer way to do the same thing and lands on the login's primary.
+    // Cancel lets the waiting connection go (the engine keeps a login that
+    // waits on its chooser running, logged in, for up to an hour); the card
+    // then reads as linked, not connected (csCancelPending).
+    // (an outline, as Disconnect is: it goes back, not forward)
+    const cancel = document.createElement("button");
+    cancel.dataset.act = "cancel";
+    cancel.textContent = "Cancel";
+    cancel.onclick = async () => {
+      cancel.disabled = true;
+      await csCancelPending(key);
+    };
+    actions.appendChild(cancel);
   } else if (csNeedsUpdate({ d, hub })) {
     // The broker is offered, the connector for it is not in this build.
     // Say so in one line and make the fix the only button.
@@ -2050,46 +4779,214 @@ function csBrokerCard(d, hub, opts) {
     on.className = "cs-connect";
     on.textContent = "Connect";
     on.onclick = async () => {
-      // A broker with fields reveals them on the first press; the next press,
-      // with the fields showing, connects. A broker with no form connects at
-      // once.
-      if (realFields.length && form.classList.contains("hidden")) {
-        form.classList.remove("hidden");
-        const first = form.querySelector("input");
-        if (first) first.focus();
+      // Connect always means connect: the boxes are already on screen when
+      // there is something to type (showForm above), so there is no first
+      // press that only reveals them.
+      //
+      // A field the LISTING marks required, left with nothing typed and
+      // nothing saved, stops here: the card names it and puts the cursor in
+      // it, and nothing is sent. (A form an adapter declared itself has no
+      // required flag; the adapter is asked, and its refusal is shown with
+      // the boxes that were left empty: see errEmpty.)
+      const typedNow = {};
+      for (const f of realFields) typedNow[f.key] = showForm ? inputs[f.key].value : "";
+      const missing = csMissingFields(realFields, typedNow, stored);
+      if (missing.length) {
+        const names = csListWords(missing.map((f) => f.label || f.key));
+        connScreen.errors[key] = { required: true,
+          message: `${names} ${missing.length > 1 ? "are" : "is"} required. ` +
+                   `Type ${missing.length > 1 ? "them" : "it"}, then press Connect.` };
+        connScreen.addFocus = "cred:" + key + ":" + missing[0].key;
+        renderConnScreen(true);
         return;
       }
       on.disabled = true;
+      on.textContent = "Connecting…";
       err.classList.add("hidden");
+      errTail.classList.add("hidden");
+      errEmpty.classList.add("hidden");
+      delete connScreen.errors[key];
+      delete connScreen.notes[key];
       try {
-        await csConnect(key, hub, inputs);
+        const out = await csConnect(key, hub, showForm ? inputs : {}, stored);
+        // csConnect came back, so what was typed has been handed to the
+        // engine (or there was nothing to hand over): the drafts have done
+        // their job and are dropped, whether or not the broker then let us
+        // in. Had the save itself failed, csConnect would have thrown and
+        // they would still be in the boxes.
+        csDraftDrop(key);
+        if (out && out.ok === false) throw new Error(out.error || "the broker did not connect");
+        delete connScreen.keysOpen[key];
         await refreshConnScreen();
+        renderConnScreen(true);
       } catch (e2) {
-        err.textContent = String(e2.message || e2);
+        // On the card, in the broker's own words, with Connect usable again.
+        // (The reason used to go only to the ticket line, which is behind
+        // this screen, and the button stayed disabled.)
+        connScreen.errors[key] = { message: String(e2.message || e2) };
+        err.textContent = csFailText(connScreen.errors[key].message, null);
         err.classList.remove("hidden");
         on.disabled = false;
+        on.textContent = "Connect";
+        // The engine's record of the failure carries the stderr tail for a
+        // linked adapter; repainting from it replaces this card with one
+        // that shows both.
+        await refreshConnScreen();
+        renderConnScreen(true);
       }
     };
     actions.appendChild(on);
   }
-  card.append(actions, err);
+  if (own) {
+    // Only on a row the user linked. A broker we ship or list is not theirs
+    // to remove, and the engine refuses it for them too.
+    const un = document.createElement("button");
+    un.className = "cs-quiet cs-unlink";
+    un.dataset.act = "unlink";
+    un.textContent = "Unlink";
+    un.onclick = () => csUnlinkBroker(key, hub);
+    actions.appendChild(un);
+  }
+  // Enter in a key box is Connect, as it is Test and add in the form below.
+  const go = actions.querySelector(".cs-connect");
+  if (go && go.textContent === "Connect") {
+    for (const inp of Object.values(inputs)) {
+      inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go.click(); });
+    }
+  }
+  card.append(actions, err, errEmpty, errTail);
+  if (printedFold) card.appendChild(printedFold);
   return card;
 }
 
-async function csConnect(key, hub, inputs) {
+/* "Cancel" on a card waiting on its account chooser: the connection the
+   engine holds open for the choice is let go, and the card reads as linked
+   (Connect, no chooser). The engine keeps such a login running, logged in,
+   for up to an hour (pending_auth). Until it has a route of its own for
+   letting one go, the pending row is disconnected: its disconnect ends a
+   login waiting on its chooser as well, so nothing of the broker is left
+   running, and it puts a ticket that waited on it back as a Disconnect does
+   (brokerDisconnect). Nothing was sent on it: no session was ever opened. */
+async function csCancelPending(key) {
+  if (connScreen.acctPreview) delete connScreen.acctPreview[key];
+  try {
+    await brokerDisconnect(key);
+    delete connScreen.errors[key];
+  } catch (e) {
+    connScreen.errors[key] = { message: String((e && e.message) || e) };
+  }
+  connScreen.broker = key;            // its row stays open, with Connect in it
+  connScreen.brokerPinned = true;
+  await refreshConnScreen();
+  renderConnScreen(true);
+}
+
+/* What an adapter printed since the screen was drawn, put on its card where
+   it is (renderConnScreen, at the watch tick): a repaint for each new line
+   threw away the account preview, the first of the chooser's two clicks, and
+   any focus or open dropdown with it. The fold is found by the profile it
+   names (csBrokerCard's data-cs-printed), compared, never built into a
+   selector. */
+function csPrintedRefresh(body) {
+  for (const fold of body.querySelectorAll(".cs-printed")) {
+    const name = fold.dataset.csPrinted;
+    const hub = (brokerPicker.rows || []).find((b) => b.broker === name);
+    const text = String((hub && hub.printed) || "");
+    const lines = fold.querySelector(".cs-errtail");
+    if (lines && lines.textContent !== text) lines.textContent = text;
+    if (text) fold.classList.remove("hidden");
+    else fold.classList.add("hidden");
+  }
+}
+
+/* Why a connect failed, as a broker's card says it. The engine passes the
+   protocol's code word in front of the broker's own sentence
+   ("unauthorized: The API secret box is empty…"); the card shows the
+   sentence (tpbPlainReason, as the ticket does). An adapter that ended
+   before answering is said in words: `printed` is what it printed (shown
+   under the sentence), "" when it printed nothing, null when not yet known. */
+function csFailText(message, printed) {
+  const said = tpbPlainReason(message);
+  if (!/^adapter disconnected\.?$/.test(said.trim())) return said;
+  if (printed == null) return "The adapter stopped.";
+  return printed ? "The adapter stopped. The last lines it printed are below."
+                 : "The adapter stopped without saying why.";
+}
+
+/* The account a broker's profile deals on, chosen on its card (the chooser's
+   second click). Requests out or held on that broker went out on the
+   account in use, and keep it (the engine's record): while anything is, the
+   switch asks first, "<the held sentence> Switch account anyway?" (Switch /
+   Not now). Not now sends nothing; Switch sends the switch with "confirm":
+   true, and the engine refuses an Ask again of those requests on the other
+   account (tpxOtherAccount). An engine that knows of one the page did not
+   answers 409 held_requests with its own sentence, asked about the same
+   way. The engine's row back, or null when nothing was switched. */
+async function csSwitchAccount(key, accountId) {
+  const held = await tpxHeldOn(key);
+  let confirm = false;
+  if (held.length) {
+    if (!(await askConfirm(`${tpxHeldText(held[held.length - 1])} Switch account anyway?`, "Switch", "Not now"))) {
+      return null;
+    }
+    confirm = true;
+  }
+  for (;;) {
+    const body = { broker: key, account_id: accountId };
+    if (confirm) body.confirm = true;
+    const r = await fetch("/api/broker/account", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const res = await readResult(r);
+    const code = res.code || (res.detail && typeof res.detail === "object" ? res.detail.code : null);
+    if (r.status === 409 && code === "held_requests" && !confirm) {
+      const words = oneLine(typeof res.detail === "string" ? res.detail
+        : (res.detail && res.detail.detail) || "A request of this broker may have been carried out.");
+      if (!(await askConfirm(`${tpbPlainReason(words)} Switch account anyway?`, "Switch", "Not now"))) return null;
+      confirm = true;
+      continue;
+    }
+    if (!r.ok) throw new Error(typeof res.detail === "string" ? res.detail : String(r.status));
+    // The account is bound and the session is open: point the ticket at it.
+    // Nothing did, so the ticket kept saying "choose an account" with no
+    // catalog while the card said connected. No arming happens here: a live
+    // account is armed from this card's own "Allow trading", after it is
+    // seen to be the one in use.
+    if (res.connected && typeof tpbSwitch === "function") {
+      const sel = $("tpx-broker");
+      if (sel) sel.value = key;
+      await tpbSwitch(key);
+    }
+    return res;
+  }
+}
+
+async function csConnect(key, hub, inputs, stored) {
   // Whatever the user typed goes to the ENGINE first, which stores it in this
   // broker's private state directory and hands it to the adapter as
   // environment at spawn (SPEC 8.5). It never rides a protocol message and it
-  // never leaves this machine. Blank fields clear a previously saved key,
-  // which is how a user takes one back. This used to be dropped on the floor:
-  // the form collected a key and nothing ever carried it anywhere, so a
-  // broker that genuinely needs one could not be connected from this screen.
+  // never leaves this machine.
+  //
+  // ONLY what was typed is sent, with `merge`, so the engine lays it over
+  // what is already stored. This form used to post every field on every
+  // Connect, blanks included, and a blank deleted the stored value: reopening
+  // a card and pressing Connect with empty boxes wiped the saved keys.
+  // Forgetting a key is its own action now (csForgetKeys).
+  //
+  // `stored` is null with an engine from before it reported stored field
+  // names. That engine does not know `merge` either and would treat a partial
+  // post as "replace everything", so there the old full post is kept.
   const typed = {};
-  for (const [k, inp] of Object.entries(inputs || {})) typed[k] = inp.value.trim();
+  for (const [k, inp] of Object.entries(inputs || {})) {
+    const v = inp.value.trim();
+    if (stored ? v !== "" : true) typed[k] = v;
+  }
   if (Object.keys(typed).length) {
+    const body = { broker: key, values: typed };
+    if (stored) body.merge = true;
     const r = await fetch("/api/broker/credentials", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ broker: key, values: typed }),
+      body: JSON.stringify(body),
     });
     if (!r.ok) {
       const d = await r.json().catch(() => ({}));
@@ -2100,10 +4997,7 @@ async function csConnect(key, hub, inputs) {
   // reuse the dropdown's connect decision VERBATIM. The live-money
   // confirmation and the post-connect arming both live in pickBroker, and a
   // broker must never reach real money by a second, parallel code path.
-  if (hub) {
-    await pickBroker(hub);
-    return;
-  }
+  if (hub) return await pickBroker(hub);
   // A directory broker with no local adapter installed. The hub gates it (it
   // only runs adapters it ships or the user linked), so a 404 here is the
   // honest state, not a faked success. Credentials the user typed are not sent:
@@ -2120,6 +5014,60 @@ async function csConnect(key, hub, inputs) {
     throw new Error(detail.detail
       || `${key} has no local adapter yet. Link it with brueconnect first.`);
   }
+}
+
+/* The symbol box. What it takes for the text typed into it: the instrument
+   whose symbol IS that text, whatever case it was typed in, else the first
+   suggestion, else nothing. The exact match is looked for in the suggestions
+   and then in the sidebar's catalog. */
+function symbolChoice(typed, suggestions, catalog) {
+  const q = String(typed == null ? "" : typed).trim().toUpperCase();
+  if (!q) return "";
+  const exact = (list) => (list || []).find(
+    (i) => String((i && i.symbol) || "").toUpperCase() === q);
+  const hit = exact(suggestions) || exact(catalog);
+  if (hit) return String(hit.symbol);
+  return suggestions && suggestions.length ? String(suggestions[0].symbol || "") : "";
+}
+
+/* Enter in the box, a pick from its list, or leaving it with text in it.
+   The box used to chart the typed text verbatim: "aapl" became the symbol
+   "aapl", which no source lists, so Enter looked as if it did nothing.
+   Now the text is resolved first (symbolChoice). An instrument already in
+   hand is taken at once; otherwise the source is asked for this exact text,
+   because the list on screen may still answer an earlier keystroke. */
+const symPick = { seq: 0, settling: false };
+async function pickTypedSymbol(input) {
+  if (symPick.settling) return;   // the blur() below fires `change` again
+  const typed = String(input.value || "").trim();
+  if (!typed) return;
+  const seq = ++symPick.seq, source = state.provider;
+  const take = (symbol) => {
+    symPick.settling = true;
+    try { input.value = symbol; setSymbol(symbol); input.blur(); }
+    finally { symPick.settling = false; }
+  };
+  const offered = state.suggest && state.suggest.provider === source
+    ? state.suggest.items : null;
+  const known = symbolChoice(typed, null, offered) || symbolChoice(typed, null, state.instruments);
+  if (known) { take(known); return; }
+  let ranked = null;
+  try { ranked = await loadInstruments(typed); } catch (e) { ranked = null; }
+  // A later Enter, a switch of source, or more typing while the answer was
+  // on its way: this pick is no longer the one that was asked for.
+  if (seq !== symPick.seq || source !== state.provider) return;
+  if (String(input.value || "").trim() !== typed) return;
+  const symbol = Array.isArray(ranked) ? symbolChoice(typed, ranked, state.instruments) : "";
+  if (symbol) { take(symbol); return; }
+  // Nothing answers the text. A broker's catalog is the whole of what it
+  // deals, so there is nothing to chart and the header says so. Every other
+  // source keeps what the box always did (LSE serves saved spellings that
+  // today's catalogue no longer lists): the text goes through as typed.
+  if (isBrokerSource(source)) {
+    if (Array.isArray(ranked)) status(`no instrument matches "${typed}"`);
+    return;
+  }
+  take(typed);
 }
 
 function setSymbol(symbol) {
@@ -2165,9 +5113,13 @@ function renderTimeframes() {
   // the finer buttons were live and simply failed when pressed. Disable what
   // this dataset cannot serve instead of offering a click that errors.
   const nativeMin = state.provider === "userdata" ? tfMinutes(datasetTf(state.symbol)) : 0;
-  for (const tf of (p ? p.timeframes : [])) {
+  // The source's own list, by length (tfOffered): a broker source lists the
+  // timeframes its adapter serves, 30m among them where it serves 30m, and
+  // in whatever order its adapter gave them.
+  for (const tf of tfOffered(p)) {
     const b = document.createElement("button");
     b.textContent = tf;
+    if (state.provider === "lse" && tf === "tick") b.title = "Live ticks only; history starts when connected";
     const tooFine = nativeMin > 0 && tfMinutes(tf) > 0 && tfMinutes(tf) < nativeMin;
     b.className = (tf === state.timeframe ? "active" : "") + (tooFine ? " disabled" : "");
     if (tooFine) {
@@ -2188,6 +5140,35 @@ function datasetTf(symbol) {
   return (d && d.timeframe) || "";
 }
 
+/* The timeframes a source lists, as its buttons show them: any that cannot be
+   compared by length (a tick chart) first, as listed, then the rest by
+   length, so 30m sits between 15m and 1h wherever the list put it. [] for a
+   source that lists none. */
+function tfOffered(p) {
+  const list = (p && Array.isArray(p.timeframes) ? p.timeframes : []).filter((tf) => typeof tf === "string" && tf);
+  const odd = list.filter((tf) => !(tfMinutes(tf) > 0));
+  const timed = list.filter((tf) => tfMinutes(tf) > 0).map((tf, i) => [tf, i])
+    .sort((a, b) => tfMinutes(a[0]) - tfMinutes(b[0]) || a[1] - b[1]).map((x) => x[0]);
+  return [...odd, ...timed];
+}
+
+/* The timeframe to chart on a source that does not list the one in hand:
+   the listed one nearest in length (the longer of two as near), a tick
+   chart's place taken by the finest; the one in hand when it is listed or
+   nothing is. */
+function tfNearest(want, offered) {
+  const list = (offered || []).filter((tf) => tfMinutes(tf) > 0);
+  if (!list.length || (offered || []).includes(want)) return want;
+  const m = tfMinutes(want);
+  if (!(m > 0)) return list.reduce((a, b) => (tfMinutes(b) < tfMinutes(a) ? b : a));
+  let best = null, gap = Infinity;
+  for (const tf of list) {
+    const g = Math.abs(Math.log(tfMinutes(tf) / m));
+    if (g < gap - 1e-9 || (Math.abs(g - gap) <= 1e-9 && tfMinutes(tf) > tfMinutes(best))) { best = tf; gap = g; }
+  }
+  return best;
+}
+
 /* Minutes per bar, for comparing two timeframe strings. 0 = not comparable
    (tick charts, or an unknown label). */
 function tfMinutes(tf) {
@@ -2203,13 +5184,15 @@ async function loadInstruments(query = "") {
   // The sidebar (no query) wants the whole catalog: folders are collapsed
   // so only opened groups ever render rows. The search datalist stays 30.
   const limit = query ? 30 : 5000;
+  const asked = state.provider;   // the source this answer belongs to
   const url = `/api/instruments?provider=${encodeURIComponent(state.provider)}` +
-              `&query=${encodeURIComponent(query)}&limit=${limit}`;
+              `&query=${encodeURIComponent(query)}&limit=${limit}` +
+              (!query && state.provider === "lse" ? "&all_current=true" : "");
   // The catalog is the one call the whole MARKETS tab is built on, and the
   // first one after a key is saved always pays for a cold provider: saving
   // registers a BRAND NEW LseProvider, so its catalog cache is empty and the
-  // call costs two gate round-trips (catalog + datasets, ~1s measured) where
-  // every later one is ~0ms. A single failure used to dead-end the tab:
+  // call fetches the catalogue once for both SDK views, while later calls
+  // use the provider's cache. A single failure used to dead-end the tab:
   // state.instruments stayed empty, so no symbol was picked, loadChart() drew
   // nothing, and nothing ever retried. Entering a perfectly good key then
   // looked exactly like a broken app. Search-as-you-type keeps its single
@@ -2226,8 +5209,19 @@ async function loadInstruments(query = "") {
     try { res = await fetch(url); if (res.ok) break; } catch (e) { res = null; }
     if (i < tries - 1) await new Promise((r) => setTimeout(r, 400 * (i + 1)));
   }
+  if (query) {
+    // The latest text typed wins. Every keystroke asks, and the answers come
+    // back in any order: the one for "aap" can land after the one for "aapl"
+    // and used to overwrite it, so the list offered AAP, AAPB, AAPD under a
+    // box that said "aapl". An answer that is not for the text now in the
+    // box is dropped, whole: no list, no status, nothing remembered.
+    const box = $("symbol");
+    if (box && typeof box.value === "string"
+        && box.value.trim() !== String(query).trim()) return;
+  }
   if (!res || !res.ok) {
     if (!query) {
+      state.instrumentsTotal = 0;
       const wl = $("watchlist");
       if (wl) {
         wl.innerHTML = '<div class="empty-actions">' +
@@ -2241,9 +5235,55 @@ async function loadInstruments(query = "") {
   }
   const items = await res.json();
   if (query) {
+    // Everything this block needs is inside it (it is exercised on its own
+    // by tests/test_current_catalog.mjs), hence an escape of its own.
+    // A source's symbols and names are third-party text: escaped, so a name
+    // holding markup or a quote can never become an element or an attribute.
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g,
+      (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    // The exact symbol first, then symbols that start with what was typed,
+    // then the rest in the source's own order. A venue with thousands of
+    // instruments has hundreds whose symbol merely contains "F"; typing F
+    // must offer F at the top, not thirty rows down or not at all.
+    const q = String(query).trim().toUpperCase();
+    const rank = (i) => {
+      const sy = String(i.symbol || "").toUpperCase();
+      return sy === q ? 0 : sy.startsWith(q) ? 1 : sy.includes(q) ? 2 : 3;
+    };
+    const ranked = items.map((i, n) => [rank(i), n, i])
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
     $("symbol-options").innerHTML =
-      items.map((i) => `<option value="${i.symbol}">${i.name}</option>`).join("");
+      ranked.map((i) => `<option value="${esc(i.symbol)}">${esc(i.name)}</option>`).join("");
+    // A found instrument may lie beyond the sidebar's page: keep the decimals
+    // its source declares, so its price prints right once it is charted.
+    if (asked === state.provider) {
+      state.digitsBySym = state.digitsBySym || {};
+      // A source's own digits only: the map still held another source's
+      // while this one's catalog was on its way.
+      if (state.digitsSource !== asked) { state.digitsBySym = {}; state.digitsSource = asked; }
+      let added = false;
+      for (const i of items) {
+        if (i.digits != null && state.digitsBySym[i.symbol] !== i.digits) {
+          state.digitsBySym[i.symbol] = i.digits;
+          added = true;
+        }
+      }
+      if (added) {
+        // the chart's map, sent again only when a search found new ones
+        state.digitsVer = (state.digitsVer || 0) + 1;
+        chartPushDigits();
+      }
+      // What the box now offers, in the order offered (pickTypedSymbol).
+      state.suggest = { provider: asked, query: String(query), items: ranked };
+    }
+    return ranked;
   } else {
+    // How many instruments the source holds in all, when it says (a
+    // connected broker does, in a header): the sidebar is a bounded page and
+    // must be able to say what it left out (see wlCutNote).
+    const total = Number(res.headers && res.headers.get
+      ? res.headers.get("X-Total-Count") : 0);
+    state.instrumentsTotal = total > 0 ? total : 0;
     // Arrival order IS the display order: the provider contract says results
     // come grouped contiguously, groups pre-ordered by the source (the
     // translator layer). No source-specific rules here, so any future
@@ -2252,7 +5292,16 @@ async function loadInstruments(query = "") {
     state.instruments = items;
     // symbol -> category lookup for the tick path (spread pips are FX-only)
     state.catBySym = {};
-    for (const i of items) state.catBySym[i.symbol] = i.category || "";
+    // symbol -> the decimals the source declares for it (fmtQuote, spreadText),
+    // and which source that is: the one asked, whatever is active by now
+    state.digitsBySym = {};
+    state.digitsSource = asked;
+    for (const i of items) {
+      state.catBySym[i.symbol] = i.category || "";
+      if (i.digits != null) state.digitsBySym[i.symbol] = i.digits;
+    }
+    state.digitsVer = (state.digitsVer || 0) + 1;
+    chartPushDigits();
     renderWatchlist();
   }
 }
@@ -2306,14 +5355,26 @@ function switchProvider(name) {
 
 async function runSwitchProvider(name) {
   state.provider = name;
+  // The source is known now: MARKETS's page is decided again from it, if it
+  // is up (marketsDecide).
+  if (marketsMainShowing()) marketsDecide();
+  syncPricePollBudget();
   state.prices = {};
   state.logos = {};
   loadPriceCache(); // last session's board paints instantly, dimmed as stale
+  // A timeframe the new source does not list is not asked of it (a broker's
+  // adapter serves only what it serves): the nearest one it lists.
+  const offered = tfOffered((state.providers || []).find((x) => x && x.name === name));
+  if (offered.length) state.timeframe = tfNearest(state.timeframe, offered);
   renderTimeframes();
   await loadInstruments();
   loadLogos();
   if (state.instruments.length) state.symbol = state.instruments[0].symbol;
   renderWatchlist();
+  // The ticket goes to the instrument now, not when its candles have come:
+  // a broker can take seconds over the first chart, and for those seconds
+  // the ticket sat on its catalog's first entry under another title.
+  if (typeof tpbFollowChart === "function") tpbFollowChart(state.symbol);
   await loadChart();
   connectStream();
   // A source switch (boot included) recharts to the list's first row without
@@ -2321,6 +5382,9 @@ async function runSwitchProvider(name) {
   // sit on its catalog's first entry (0001.HK) under a EUR/JPY chart when the
   // broker's catalog landed before this list did.
   if (typeof tpbFollowChart === "function") tpbFollowChart(state.symbol);
+  // The key form's line in the sidebar again, after the list above was
+  // painted under it (the source has not changed since: marketsDecide).
+  if (state.provider === name && marketsMainShowing() && marketsWantsKey()) marketsDecide();
 }
 
 /* Chart an LSE instrument from a surface that is not the watchlist (the
@@ -2421,6 +5485,7 @@ async function applyLayout(row) {
   if (provider !== state.provider &&
       state.providers.some((p) => p.name === provider)) {
     state.provider = provider;
+    syncPricePollBudget();
     state.prices = {};
     state.logos = {};
     loadPriceCache();
@@ -2510,14 +5575,16 @@ function setupLayouts() {
       return true;
     },
     // Chart right-click trading. The menu (mount.tsx) renders the rows; the
-    // ticket owns the qty, the broker routing and the result message, so
-    // the bridge carries only intent. tradeInfo says whether trading is
-    // available at all and which pending types the connected venue deals.
+    // ticket owns the broker routing and the result message. tradeInfo says
+    // whether trading is available at all and which pending types the
+    // connected venue deals. The menu's order form sends the size typed in
+    // it (`units`); the rows at market send none, and take the ticket's box.
     tradeInfo: () => tpxTradeInfo(),
-    quickOrder: (side, otype, price) => tpxQuickOrder(side, otype, price),
+    quickOrder: (side, otype, price, units) => tpxQuickOrder(side, otype, price, units),
     // The shell's own price formatter, so menu rows print "@ 64,731.9" the
     // same way the dock does instead of inventing a second decimals rule.
-    fmtPrice: (p) => fmt(p),
+    // On a source that declares digits the level follows them (fmtLevel).
+    fmtPrice: (p) => fmtLevel(state.symbol, p),
     editIndicator: (label) => {
       const idx = state.activeIndicators.findIndex((i) => engineLabel(i) === label);
       if (idx < 0) return false;
@@ -2794,33 +5861,185 @@ function aiLogoHtml(agent) {
    (Context / Model / Panel), keyboard-navigable, with submenus for model,
    effort and dataset mentions. Typing after "/" filters the rows. */
 
+/* Model menus come from the user's own CLI. GET /api/ai/models asks Codex
+   for its catalogue and Claude Code for its own menu, so a model the
+   provider ships or withdraws reaches this menu with no app release, in the
+   provider's words, for the account that is signed in.
+
+   The two lists below are only what the menu shows before the CLI has
+   answered, or when it cannot be asked. They hold names the CLI resolves
+   itself, with no version in the words, and no exact model id: a typed id
+   is a row that fails the day the provider withdraws the model. */
 const AIR_CLAUDE_MODELS = [
   { id: "", name: "Default (recommended)", desc: "Whatever your plan uses out of the box" },
-  { id: "opus", name: "Opus", desc: "Opus 4.8 with 1M context · Best for everyday, complex tasks" },
-  { id: "fable", name: "Fable", desc: "Fable 5 · Most capable for your hardest and longest-running tasks" },
-  { id: "sonnet", name: "Sonnet", desc: "Sonnet 5 · Efficient for routine tasks" },
-  { id: "haiku", name: "Haiku", desc: "Haiku 4.5 · Fastest for quick answers" },
+  { id: "opus", name: "Opus", desc: "Best for everyday, complex tasks" },
+  { id: "fable", name: "Fable", desc: "Most capable for your hardest and longest-running tasks" },
+  { id: "sonnet", name: "Sonnet", desc: "Efficient for routine tasks" },
+  { id: "haiku", name: "Haiku", desc: "Fastest for quick answers" },
 ];
-
-// ChatGPT/Codex lineup checked against learn.chatgpt.com/docs/models
-// (researched names are guesses until checked). IDs are
-// what `codex -m` takes. 5.4/5.4-mini/5.3-codex-spark left to Custom: the
-// menu stays the four everyday choices, not the whole catalog.
 const AIR_CODEX_MODELS = [
   { id: "", name: "Default (recommended)", desc: "Codex picks the model for you" },
-  { id: "gpt-5.6-sol", name: "Sol", desc: "GPT-5.6 Sol · Flagship for the most complex work" },
-  { id: "gpt-5.6-terra", name: "Terra", desc: "GPT-5.6 Terra · Balanced everyday workhorse" },
-  { id: "gpt-5.6-luna", name: "Luna", desc: "GPT-5.6 Luna · Fastest and most affordable" },
-  { id: "gpt-5.5", name: "GPT-5.5", desc: "Previous-generation frontier model" },
 ];
 
-// Model choices per provider. Claude and Codex get named menus; the other
-// CLIs (Gemini, Kimi, Qwen, ...) keep Default plus a typed custom name
-// until someone asks for their lineups.
+// What each CLI last said, by provider: { models, unavailable, cli, at }.
+// `unavailable` are models the CLI names but cannot run until it is updated;
+// Claude Code says which version each one needs, and the row shows its line.
+// `cli` is set when the CLI itself is behind its newest published version:
+// a CLI lists only the models it knows, so the menu offers to update it.
+// `fresh` is true once the CLI has answered in this window: an answer kept
+// from the last launch draws the menu but never starts an update.
+const AIR_MODELS_KEY = "lset-air-models";
+const AIR_MODELS_MAX_AGE_MS = 7 * 86400 * 1000;
+const AIR_CLI_NAME = { claude: "Claude Code", codex: "Codex" };
+const AIR_UPDATE_CMD = { claude: "claude update", codex: "codex update" };
+const AIR_UPDATE_OFFERED_KEY = "lset-air-update-offered";
+const aiLiveModels = {};
+const aiCliUpdating = {}; // provider -> true while its updater runs
+
+function aiModelsApply(agent, d, at) {
+  if (!agent || !d || d.ok !== true || !Array.isArray(d.models)) return false;
+  const text = (v, cap) => String(v == null ? "" : v).slice(0, cap);
+  const models = d.models
+    .filter((m) => m && typeof m.id === "string" && m.id.length <= 100 &&
+                   typeof m.name === "string" && m.name)
+    .map((m) => ({ id: m.id, name: text(m.name, 80), desc: text(m.desc, 200) }));
+  if (!models.length) return false;
+  const unavailable = (Array.isArray(d.unavailable) ? d.unavailable : [])
+    .filter((m) => m && typeof m.name === "string" && m.name)
+    .map((m) => ({ name: text(m.name, 80), desc: text(m.desc, 200) }));
+  const c = d.cli;
+  // auto: true = the terminal keeps this CLI current, false = the user said
+  // no, null = never chosen. tried: a version an update did not reach.
+  const auto = c && c.auto === true ? true : c && c.auto === false ? false : null;
+  const cli = c && c.outdated === true && typeof c.installed === "string" && c.installed &&
+              typeof c.latest === "string" && c.latest
+    ? { name: text(c.name || agent, 40), installed: text(c.installed, 20),
+        latest: text(c.latest, 20), update: text(c.update || "", 60),
+        auto, tried: text(c.tried || "", 20) }
+    : null;
+  aiLiveModels[agent] = { models, unavailable, cli, auto, fresh: false, at: at || Date.now(),
+                          version: c && typeof c.installed === "string" ? text(c.installed, 20) : "" };
+  return true;
+}
+
+// The last answer is kept so the menu is right the moment the app opens; a
+// week-old one is dropped rather than trusted.
+(function aiModelsBoot() {
+  try {
+    const saved = JSON.parse(localStorage.getItem(AIR_MODELS_KEY) || "null") || {};
+    for (const agent of Object.keys(saved)) {
+      const one = saved[agent];
+      if (one && Date.now() - (one.at || 0) < AIR_MODELS_MAX_AGE_MS) {
+        aiModelsApply(agent, { ok: true, models: one.models, unavailable: one.unavailable,
+                               cli: one.cli ? Object.assign({ outdated: true }, one.cli) : null }, one.at);
+      }
+    }
+  } catch (e) { /* no cache yet */ }
+})();
+
+// Ask the CLI again. Resolves true when the menu's rows changed, so an open
+// menu can redraw; a CLI that cannot answer leaves the rows as they were.
+function aiModelsRefresh(agent, force) {
+  if (!agent || agent === "lse") return Promise.resolve(false);
+  const rows = (one) => JSON.stringify(one ? [one.models, one.unavailable, one.cli] : null);
+  const before = rows(aiLiveModels[agent]);
+  return fetch("/api/ai/models?agent=" + encodeURIComponent(agent) + (force ? "&refresh=1" : ""),
+               { cache: "no-store" })
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      if (!aiModelsApply(agent, d)) return false;
+      aiLiveModels[agent].fresh = true;
+      try { localStorage.setItem(AIR_MODELS_KEY, JSON.stringify(aiLiveModels)); }
+      catch (e) { /* cache is optional */ }
+      return rows(aiLiveModels[agent]) !== before;
+    })
+    .catch(() => false);
+}
+
+// Bring the CLI to its newest version: the engine runs the CLI's own
+// updater, then the CLI is asked for its models again. `asked` is the
+// user's own click or /update, which also turns on keeping it current;
+// without it the engine allows the update only where that is already on.
+// Resolves the engine's answer ({ok, changed, before, after, error}), or
+// null when an update of this CLI is already running.
+function aiCliUpdate(agent, asked) {
+  if (aiCliUpdating[agent]) return Promise.resolve(null);
+  aiCliUpdating[agent] = true;
+  return fetch("/api/ai/update", { method: "POST", headers: { "Content-Type": "application/json" },
+                                   body: JSON.stringify({ agent, asked: !!asked }) })
+    .then((r) => r.json().then((d) => (r.ok ? d
+      : { ok: false, error: (d && d.detail) || "the update was refused" })))
+    .catch(() => ({ ok: false, error: "the terminal's engine did not answer" }))
+    .then((res) => {
+      aiCliUpdating[agent] = false;
+      return aiModelsRefresh(agent, true).then(() => res);
+    });
+}
+
+// True when the terminal should update this CLI by itself now: the user
+// turned that on (or the terminal installed the CLI), the CLI has just said
+// it is behind, and this version has not already been tried without success.
+function aiShouldAutoUpdate(agent) {
+  const live = aiLiveModels[agent];
+  const c = live && live.fresh && live.cli;
+  return !!c && c.auto === true && c.tried !== c.latest && !aiCliUpdating[agent];
+}
+
+// For a user who has not chosen: one line, once per new version, saying
+// the CLI is behind and how to update it. "" when there is nothing to say.
+function aiUpdateOffer(agent) {
+  const live = aiLiveModels[agent];
+  const c = live && live.fresh && live.cli;
+  if (!c || c.auto !== null) return "";
+  let seen = {};
+  try { seen = JSON.parse(localStorage.getItem(AIR_UPDATE_OFFERED_KEY) || "{}") || {}; }
+  catch (e) { seen = {}; }
+  if (seen[agent] === c.latest) return "";
+  seen[agent] = c.latest;
+  try { localStorage.setItem(AIR_UPDATE_OFFERED_KEY, JSON.stringify(seen)); }
+  catch (e) { /* then it is said again next launch */ }
+  return `${c.name} ${c.latest} is out; this computer has ${c.installed}, so the newest models ` +
+    "may be missing from the model menu. Type /update to update it now and keep it up to date.";
+}
+
+// Model choices per provider: the CLI's own list when it has answered,
+// else the built-in names above. Other CLIs keep Default plus a typed name.
 function modelsFor(agent) {
+  const live = aiLiveModels[agent];
+  if (live) return live.models;
   if (agent === "claude") return AIR_CLAUDE_MODELS;
   if (agent === "codex") return AIR_CODEX_MODELS;
   return [{ id: "", name: "Default", desc: "The CLI's own default model" }];
+}
+
+// The rows both model menus draw: the models, then the ones that need a
+// newer CLI (shown, not selectable), then one click to update the CLI when
+// it is behind, then a typed name for every provider, so no list can ever
+// stand between a user and a model.
+function modelMenuRows(agent) {
+  const live = aiLiveModels[agent];
+  const rows = modelsFor(agent).map((m) => ({ id: m.id, name: m.name, desc: m.desc }));
+  ((live && live.unavailable) || []).forEach((m, i) => {
+    rows.push({ id: "__update:" + i, name: m.name, desc: m.desc, needsUpdate: true });
+  });
+  if (live && live.cli) {
+    const c = live.cli;
+    rows.push(aiCliUpdating[agent]
+      ? { id: "__update:cli", name: `Updating ${c.name}…`, needsUpdate: true, cliUpdate: true, busy: true,
+          desc: "A few seconds. The newest models appear here when it is done." }
+      : { id: "__update:cli", name: `Update ${c.name} to ${c.latest}`, cliUpdate: true,
+          desc: `This computer has ${c.installed}; new models come with new versions. ` +
+                (c.auto === true ? "Click to update now." : "Click to update now and keep it up to date.") });
+  }
+  rows.push({ id: "__custom", name: "Custom model…", desc: "Type a model name" });
+  return rows;
+}
+
+// What picking a model that needs a newer CLI says: the CLI's own line, and
+// how to act.
+function modelUpdateNote(agent, row) {
+  return `${row.name} needs a newer version of ${AIR_CLI_NAME[agent] || "this provider's CLI"}` +
+    (row.desc ? ` (${row.desc})` : "") + ". Type /update to update it now.";
 }
 
 const AIR_EFFORTS = ["default", "low", "medium", "high", "xhigh", "max"];
@@ -2903,7 +6122,9 @@ const AIR_HELP =
   "view is the agent's full interactive UI (first-time sign-in, approving " +
   "actions the chat view is not allowed to auto-approve).\n\n" +
   "Commands: /new fresh conversation, /model <name> switch model, " +
-  "/terminal open the agent's terminal, /help this text.\n\n" +
+  "/update bring your agent's CLI to its newest version (new models come " +
+  "with new versions), /autoupdate on|off whether the terminal does that " +
+  "by itself, /terminal open the agent's terminal, /help this text.\n\n" +
   "Modes (a standing stance for every turn until /mode off): " +
   AIR_MODES.map((m) => "/" + m.id + " " + m.desc).join("; ") +
   ". Add text after the command to run one turn in that stance without switching.";
@@ -2922,6 +6143,238 @@ const LSE_HELP =
   "Modes (a standing stance for every turn until /mode off): " +
   AIR_MODES.map((m) => "/" + m.id + " " + m.desc).join("; ") +
   ". Add text after the command to run one turn in that stance without switching.";
+
+/* ── More than one window ────────────────────────────────────────────────
+   The terminal can be open in several windows at once: MARKETS on one
+   monitor, WORKSPACE on another. Every window is this same page on the same
+   engine; a window knows which it is from its address (?win=, read in
+   index.html into window.__lseWin) and keeps the view it shows there too
+   (?view=), so a reload, and the desktop app's next launch, bring each
+   window back where it was.
+
+   Opening one: the NEW WINDOW button in the header (the view on screen),
+   Ctrl+Shift+N, or Ctrl-click / middle-click on a section or sub-view tab
+   (that tab). In the desktop app the shell makes the window, places it on
+   a monitor that has none, and remembers it (desktop/main.js); in a
+   browser it is window.open.
+
+   What every window shares is the engine, and four things that assumed one
+   page are kept right across windows:
+   - the watchlist's price budget (pollPrices, above);
+   - a broker's display subscriptions (X-LSE-Window names the window; the
+     hub keeps each window's claim apart);
+   - saved chart work (the engine merges each window's save, workspace.py),
+     and the shared lists a window shows are read again when another window
+     saves them (winSectionChanged);
+   - the assistant's "open this" commands, carried out by the window last
+     used and no other (winTakesNavigation). */
+const lseWin = (typeof window !== "undefined" && window.__lseWin) ||
+  { id: "main", token: "main.0", view: "" };
+const WIN_ACTIVE_KEY = "lset-win-active";
+
+/* The view on screen as "<section>" or "<section>/<sub-view id>": the rail
+   tab's id without "rail-", and the lit sub-rail button's id. */
+function viewId() {
+  const rail = document.querySelector(".rail-btn.active");
+  if (!rail || !rail.id || rail.id.indexOf("rail-") !== 0) return "markets";
+  const sub = document.querySelector("#subrail .subrail-btn.active");
+  return rail.id.slice(5) + (sub && sub.id ? "/" + sub.id : "");
+}
+
+// The view a tab leads to: a rail tab's section, or a sub-view under the
+// section whose bar lists it.
+function viewOfTab(btn) {
+  if (!btn || !btn.id) return "";
+  if (btn.classList.contains("rail-btn")) return btn.id.indexOf("rail-") === 0 ? btn.id.slice(5) : "";
+  for (const [section, items] of Object.entries(SUBRAIL)) {
+    if (items.some((it) => it.id === btn.id && it.go)) return section + "/" + btn.id;
+  }
+  return "";
+}
+
+/* Go to a view by its id, with the same handlers a click uses. False when
+   the id names nothing this build shows (an older address, a hosted page
+   without that section): the window then stays where it is. */
+function viewOpen(id) {
+  const m = /^([a-z]{1,16})(?:\/([a-z0-9-]{1,40}))?$/.exec(String(id || ""));
+  if (!m) return false;
+  if (m[2]) {
+    const items = SUBRAIL[m[1]] || [];
+    const it = items.find((x) => x.id === m[2]);
+    const rail = document.getElementById("rail-" + m[1]);
+    if (it && it.go && rail && !rail.classList.contains("hidden")) { it.go(); return true; }
+  }
+  const b = document.getElementById("rail-" + m[1]);
+  if (!b || !b.classList.contains("rail-btn") || b.classList.contains("hidden")) return false;
+  b.click();
+  return true;
+}
+
+// The address follows the view (replaceState: no history entry, no load).
+let viewSyncTimer = null;
+function viewSyncAddress() {
+  if (viewSyncTimer !== null) return;
+  viewSyncTimer = setTimeout(() => {
+    viewSyncTimer = null;
+    // The ticket, its dock and the rail's cards belong to MARKETS > PRICE &
+    // CHARTS. Their own sync listens for clicks on the tabs; a view opened
+    // by its address, or by the assistant, is not a click.
+    try { if (typeof tpx !== "undefined" && tpx && tpx.sync) tpx.sync(); } catch (e) { /* not set up yet */ }
+    try {
+      const q = new URLSearchParams(location.search);
+      const v = viewId();
+      if (q.get("view") === v) return;
+      q.set("view", v);
+      history.replaceState(null, "", location.pathname + "?" + q.toString());
+    } catch (e) { /* a page without an address to keep */ }
+  }, 0);
+}
+
+function winOpen(view) {
+  const v = view || viewId();
+  const shell = window.lseShell && window.lseShell.openWindow;
+  if (shell) {
+    Promise.resolve(shell(v)).catch(() => status("could not open a new window"));
+    return;
+  }
+  const id = "w" + Date.now().toString(36);
+  const url = location.origin + "/?win=" + id + "&view=" + encodeURIComponent(v);
+  // In a browser: a window of its own, not a tab, so it can go to another
+  // monitor. An older desktop shell answers this by opening the browser.
+  const w = window.open(url, "lset-" + id, "popup=yes,width=1280,height=820");
+  if (!w) status("The new window was blocked; allow pop-ups for this page.");
+}
+
+/* The window last used. A click, a key or the focus arriving marks it; the
+   mark is cleared when that window goes. */
+function winMarkActive() {
+  try {
+    if (localStorage.getItem(WIN_ACTIVE_KEY) !== lseWin.token) {
+      localStorage.setItem(WIN_ACTIVE_KEY, lseWin.token);
+    }
+  } catch (e) { /* storage disabled */ }
+}
+
+// The windows open now, by token: each holds a lock named for itself for
+// as long as its page lives. null when the browser cannot say.
+async function winOpenTokens() {
+  try {
+    if (!navigator.locks || !navigator.locks.query) return null;
+    const q = await navigator.locks.query();
+    return (q.held || []).map((l) => String(l.name || ""))
+      .filter((n) => n.indexOf("lset-win:") === 0).map((n) => n.slice(9));
+  } catch (e) { return null; }
+}
+
+/* Does this window carry out a navigation the assistant asked for? One
+   window does: the one last used when it is still open, else the main
+   window, else the first by name. */
+async function winTakesNavigation() {
+  let cur = null;
+  try { cur = localStorage.getItem(WIN_ACTIVE_KEY); } catch (e) { return true; }
+  if (cur === lseWin.token) return true;
+  const open = await winOpenTokens();
+  if (open === null) return !cur && lseWin.id === "main";
+  if (cur && open.includes(cur)) return false;
+  const mains = open.filter((t) => t.indexOf("main.") === 0);
+  const pick = (mains.length ? mains : open).slice().sort()[0];
+  return !pick || pick === lseWin.token;
+}
+
+/* Another window saved a workspace section: read again the parts of it
+   this window shows. The chart bundle keeps its own copy of its sections;
+   it is told to drop that copy, and reads the file at its next use. */
+async function winSectionChanged(section) {
+  try {
+    if (window.LSEChart && window.LSEChart.invalidateWorkspaceSection) {
+      window.LSEChart.invalidateWorkspaceSection(section);
+    }
+  } catch (e) { /* an older bundle without the call */ }
+  if (section === "dashboards") {
+    if (typeof dashRemoteChanged === "function") dashRemoteChanged();
+    return;
+  }
+  if (section !== "shell") return;
+  let v = null;
+  try {
+    const body = await fetch("/api/workspace/shell").then((r) => (r.ok ? r.json() : null));
+    v = body && body.value;
+  } catch (e) { return; }
+  if (!v || typeof v !== "object") return;
+  // The lists every window shares: stars, favourite indicators, the rail's
+  // cards. The chart type and active indicators stay each window's own.
+  if (v.watchlists && typeof v.watchlists === "object") {
+    const next = {};
+    for (const [prov, list] of Object.entries(v.watchlists)) {
+      if (Array.isArray(list)) next[prov] = list.filter((x) => typeof x === "string");
+    }
+    if (JSON.stringify(next) !== JSON.stringify(state.watchlists || {})) {
+      state.watchlists = next;
+      if (state.provider && state.provider !== "userdata" &&
+          !$("side").classList.contains("hidden")) renderWatchlist();
+    }
+  }
+  if (Array.isArray(v.favoriteIndicators)) {
+    state.favoriteIndicators = v.favoriteIndicators.filter((n) => typeof n === "string");
+  }
+  if (Array.isArray(v.railWidgets) && typeof rw !== "undefined" && rw && rw.loaded) {
+    const list = v.railWidgets.filter((x) => x && RW_DEFS[x.type]);
+    if (JSON.stringify(list) !== JSON.stringify(rw.list)) { rw.list = list; rwRenderStack(); }
+  }
+}
+
+function setupWindows(hosted) {
+  const btn = $("win-new");
+  if (hosted) {
+    // the hosted page is one embedded frame; there is no second window of it
+    if (btn) btn.classList.add("hidden");
+    return;
+  }
+  if (btn) btn.onclick = () => winOpen();
+  // Ctrl-click (Cmd on a Mac) or middle-click on a tab opens that tab in a
+  // new window, as a browser does with a link. Capture phase: the tab's own
+  // handler must not also switch this window.
+  const tabOf = (e) => (e.target && e.target.closest
+    ? e.target.closest(".rail-btn, .subrail-btn") : null);
+  document.addEventListener("click", (e) => {
+    if (!(e.ctrlKey || e.metaKey) || e.button !== 0) return;
+    const view = viewOfTab(tabOf(e));
+    if (!view) return;
+    e.preventDefault(); e.stopPropagation();
+    winOpen(view);
+  }, true);
+  document.addEventListener("auxclick", (e) => {
+    if (e.button !== 1) return;
+    const view = viewOfTab(tabOf(e));
+    if (!view) return;
+    e.preventDefault(); e.stopPropagation();
+    winOpen(view);
+  }, true);
+  document.addEventListener("keydown", (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey &&
+        (e.key === "N" || e.key === "n")) {
+      e.preventDefault();
+      winOpen();
+    }
+  }, true);
+  // presence, and "the window last used"
+  try {
+    if (navigator.locks && navigator.locks.request) {
+      navigator.locks.request("lset-win:" + lseWin.token, () => new Promise(() => {}));
+    }
+  } catch (e) { /* no locks: winTakesNavigation falls back to the mark alone */ }
+  window.addEventListener("focus", winMarkActive);
+  document.addEventListener("pointerdown", winMarkActive, true);
+  document.addEventListener("keydown", winMarkActive, true);
+  window.addEventListener("pagehide", () => {
+    try {
+      if (localStorage.getItem(WIN_ACTIVE_KEY) === lseWin.token) {
+        localStorage.removeItem(WIN_ACTIVE_KEY);
+      }
+    } catch (e) { /* storage disabled */ }
+  });
+  if (document.hasFocus()) winMarkActive();
+}
 
 /* ── UI event bus: the assistant's open_in_app tool drives the screen ──
    The engine pushes navigation events over SSE (/api/ui/events); this
@@ -2974,6 +6427,15 @@ async function uiEventHandle(ev) {
     }
     return;
   }
+  if (ev.type === "workspace_section") {
+    // another window saved a workspace section (the engine names the sender)
+    if (ev.by !== lseWin.token) await winSectionChanged(String(ev.section || ""));
+    return;
+  }
+  // A navigation moves ONE window: the one last used. File changes below
+  // (workspace_changed, workspace_removed) concern every window.
+  if (["open_dataset", "open_file", "open_backtest_run", "show_chart",
+       "open_section"].includes(ev.type) && !(await winTakesNavigation())) return;
   if (ev.type === "open_dataset") {
     await openBacktest("py");
     const d = (state.datasetList || []).find((x) => x.symbol === ev.symbol);
@@ -3082,6 +6544,73 @@ function setupAiPanel(hosted) {
   };
 
   const label = (a) => (ai.meta[a] && ai.meta[a].label) || AI_LABEL[a] || a;
+
+  /* ----- keeping the user's own CLI current -----
+     A CLI lists only the models it knows, so the model menus are only as
+     new as the CLI. modelsSync asks the CLI for its models and, when it is
+     behind: updates it by itself where the user turned that on (or the
+     terminal installed it), else says so once per new version. cliUpdate
+     runs the update and tells the user what happened, in that provider's
+     transcript. Never during a turn; the engine refuses that too. */
+  const cliName = (a) => AIR_CLI_NAME[a] || label(a);
+  function noteTo(agent, text) {
+    session(agent).msgs.push({ kind: "note", text });
+    if (ai.agent === agent) chatRender();
+  }
+  function redrawModelMenus() {
+    renderModelBtn();
+    if (!$("air-model-menu").classList.contains("hidden")) renderModelMenu();
+    if (ai.menu && ai.menu.view === "model" && !$("air-slash").classList.contains("hidden")) slashRender(true);
+  }
+  function cliUpdate(agent, asked) {
+    if (aiCliUpdating[agent]) return Promise.resolve(null);
+    const c = (aiLiveModels[agent] || {}).cli;
+    const name = (c && c.name) || cliName(agent);
+    noteTo(agent, `Updating ${name}${c ? " to " + c.latest : ""}…`);
+    const run = aiCliUpdate(agent, asked);
+    if (ai.agent === agent) redrawModelMenus();
+    return run.then((r) => {
+      if (!r) return r;
+      let text;
+      if (r.ok && r.changed) {
+        text = `${name} updated: ${r.before} → ${r.after}. The model menu now lists what it offers.` +
+          (asked ? " The terminal keeps it up to date from now on (« /autoupdate off » stops that)." : "");
+      } else if (r.ok) {
+        text = `${name} is already the newest its own updater offers (${r.after || r.before}).`;
+      } else {
+        text = `${name} could not be updated: ${r.error || "the update failed"}. It still works as it was` +
+          (AIR_UPDATE_CMD[agent] ? `; you can also run « ${AIR_UPDATE_CMD[agent]} » in the Terminal view.` : ".");
+      }
+      noteTo(agent, text);
+      if (ai.agent === agent) redrawModelMenus();
+      return r;
+    });
+  }
+  function modelsSync(agent, force) {
+    return aiModelsRefresh(agent, force).then((changed) => {
+      if (changed && ai.agent === agent) redrawModelMenus();
+      if (aiShouldAutoUpdate(agent) && !session(agent).busy) {
+        cliUpdate(agent, false);
+      } else {
+        const offer = aiUpdateOffer(agent);
+        if (offer) noteTo(agent, offer);
+      }
+      return changed;
+    });
+  }
+  function setAutoUpdate(agent, on) {
+    return fetch("/api/ai/auto-update", { method: "POST", headers: { "Content-Type": "application/json" },
+                                          body: JSON.stringify({ agent, enabled: !!on }) })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) { noteTo(agent, "The setting could not be saved."); return; }
+        noteTo(agent, on
+          ? `The terminal keeps ${cliName(agent)} up to date from now on.`
+          : `The terminal no longer updates ${cliName(agent)} by itself. /update still does it when you ask.`);
+        return modelsSync(agent, true);
+      })
+      .catch(() => noteTo(agent, "The setting could not be saved."));
+  }
   const session = (a) => {
     if (!ai.sessions[a]) ai.sessions[a] = { ws: null, msgs: [], busy: false, model: "", effort: "", id: "", sid: "", mode: "" };
     return ai.sessions[a];
@@ -3526,10 +7055,15 @@ function setupAiPanel(hosted) {
       // and null is a meaningful answer ("no stop set"), not missing data.
       sl_price: p.sl_price === undefined ? null : p.sl_price,
       tp_price: p.tp_price === undefined ? null : p.tp_price,
+      trail_points: p.trail_points || 0,
       opened_at: p.opened_at || null,
       };
     });
-    return {
+    // The dock's broker, when the ticket trades through one: a broker whose
+    // terms keep its prices on this computer has the current prices of its
+    // positions left out of what an assistant is given, with the reason.
+    const dockBroker = (typeof tpb !== "undefined" && tpb && tpb.broker) || "lse-hosted";
+    return aiWithholdAccount({
       name: tpx.acct.name || "",
       balance: tpx.acct.balance,
       equity: tpx.acct.equity,
@@ -3539,7 +7073,7 @@ function setupAiPanel(hosted) {
       starting_balance: tpx.acct.starting_balance,
       used_margin: tpx.acct.used_margin,
       positions: poss,
-    };
+    }, termsWithheld(brokerPicker.rows, dockBroker));
   };
 
   /* ── the screen map ────────────────────────────────────────────────────
@@ -3589,7 +7123,11 @@ function setupAiPanel(hosted) {
         const c = state.candleData || [];
         const last = c.length ? c[c.length - 1] : null;
         const q = state.quotes[state.symbol];
-        return {
+        // A chart on a broker whose terms keep its prices on this computer
+        // tells the assistant what is charted, never at what price, and why.
+        const why = isBrokerSource(state.provider)
+          ? termsWithheld(brokerPicker.rows, String(state.provider).slice("broker:".length)) : "";
+        return aiWithholdChart({
           symbol: state.symbol, timeframe: state.timeframe,
           chart_type: state.chartType,
           bars_loaded: c.length,
@@ -3599,7 +7137,7 @@ function setupAiPanel(hosted) {
           // The answer to "what indicators are on my chart", which was
           // unanswerable before this map existed.
           indicators: (state.activeIndicators || []).map((i) => i.name),
-        };
+        }, why);
       } },
 
     { id: "acct-dock", label: "Account dock (positions / history)",
@@ -3629,6 +7167,10 @@ function setupAiPanel(hosted) {
              "any other broker: POST /api/broker/order " +
              "{broker, symbol, side, qty, sl?, tp?} (needs user approval); " +
              "symbol must be the BROKER's spelling from its catalog"],
+      // On a live connection whose broker has every order placed by hand
+      // (SPEC 3.3), no door is offered: the sentence says why.
+      moreNow: (more) => aiTradeDoor(brokerPicker.rows,
+        (typeof tpb !== "undefined" && tpb) ? tpb.broker : "", more),
       data: () => {
         const v = (id) => { const e = $(id); return e ? e.value : null; };
         return { symbol: state.symbol, qty: v("tpx-qty"),
@@ -3893,8 +7435,14 @@ function setupAiPanel(hosted) {
       // A throwing region must not cost the agent the whole map, so each
       // one is isolated and reports its own failure honestly.
       try { data = spec.data(); } catch (e) { data = { error: String(e) }; }
+      // `moreNow`: a region whose doors depend on the moment (the ticket's,
+      // on a connection whose broker's terms have orders placed by hand).
+      let more = spec.more;
+      if (typeof spec.moreNow === "function") {
+        try { more = spec.moreNow(spec.more); } catch (e) { more = spec.more; }
+      }
       regions.push({ id: spec.id, label: spec.label, what: spec.what,
-                     ...st, more: spec.more, data });
+                     ...st, more, data });
     }
     return {
       // Stamped so stale state is visible rather than silently wrong: the
@@ -4120,7 +7668,7 @@ function setupAiPanel(hosted) {
           ai.accountCard = null;
         } catch (e) {
           out.disabled = false;
-          out.textContent = `Sign out failed: ${String(e.message || e).slice(0, 60)}`;
+          out.textContent = `Sign out failed: ${oneLine(e.message || e)}`;
           return;
         }
         refreshStatus().then(chatRender);
@@ -4415,8 +7963,8 @@ function setupAiPanel(hosted) {
       `rel="noopener">Get one here</a>, then paste it:</div>`;
     const row = document.createElement("div");
     row.className = "air-code";
-    const inp = document.createElement("input");
-    inp.type = "password";
+    // a key box no browser offers to save (csSecretBox)
+    const inp = csSecretBox(document.createElement("input"));
     inp.placeholder = "lse_live_...";
     const ok = document.createElement("button");
     ok.textContent = "Save";
@@ -4430,6 +7978,7 @@ function setupAiPanel(hosted) {
         body: JSON.stringify({ key }),
       }).catch(() => null);
       if (r && r.ok) {
+        resetPricePollKey();
         s.needKey = false;
         state.lseConfigured = true;
         if (s.pending) { const t = s.pending; s.pending = null; lseSend(t); }
@@ -4850,6 +8399,28 @@ function setupAiPanel(hosted) {
           ? `model: ${s.model} (« /model default » clears it)`
           : "usage: /model <name>, e.g. /model opus" });
       }
+    } else if (ai.agent !== "lse" && cmd === "/update") {
+      const agent = ai.agent;
+      aiModelsRefresh(agent, true).then(() => {
+        const live = aiLiveModels[agent];
+        if (!live || !live.fresh) {
+          noteTo(agent, `${cliName(agent)} could not be asked for its version. Is it installed?`);
+        } else if (live.cli) {
+          cliUpdate(agent, true);
+        } else {
+          noteTo(agent, `${cliName(agent)} is up to date` + (live.version ? ` (${live.version})` : "") + ".");
+        }
+      });
+      return; // async: it renders itself
+    } else if (ai.agent !== "lse" && cmd === "/autoupdate") {
+      const live = aiLiveModels[ai.agent];
+      if (arg === "on" || arg === "off") {
+        setAutoUpdate(ai.agent, arg === "on");
+        return; // async: it renders itself
+      }
+      s.msgs.push({ kind: "note", text:
+        `The terminal ${live && live.auto === true ? "keeps" : "does not keep"} ${cliName(ai.agent)} ` +
+        "up to date by itself. usage: /autoupdate on, /autoupdate off" });
     } else if (cmd === "/terminal") {
       setMode("term");
     } else if (cmd === "/help") {
@@ -4909,11 +8480,9 @@ function setupAiPanel(hosted) {
       ].concat(modeRows());
     }
     if (ai.menu.view === "model") {
-      const models = modelsFor(ai.agent).concat(ai.agent === "claude" ? []
-        : [{ id: "__custom", name: "Custom model…", desc: "Type a model name" }]);
-      return [{ header: "Select a model" }].concat(models.map((m) => ({
-        id: "model:" + m.id, label: m.name, desc: m.desc,
-        check: (s.model || "") === m.id,
+      return [{ header: "Select a model" }].concat(modelMenuRows(ai.agent).map((m) => ({
+        id: "model:" + m.id, label: m.name, desc: m.desc, off: !!m.needsUpdate,
+        check: !m.needsUpdate && (s.model || "") === m.id,
       })));
     }
     if (ai.menu.view === "effort") {
@@ -4950,6 +8519,11 @@ function setupAiPanel(hosted) {
     if (ai.agent === "claude") {
       rows.push({ id: "effort", label: "Effort",
                   value: (s.effort || "default"), sub: true });
+    }
+    if (AIR_CLI_NAME[ai.agent]) {
+      const live = aiLiveModels[ai.agent];
+      rows.push({ id: "autoupdate", label: `Keep ${AIR_CLI_NAME[ai.agent]} up to date`,
+                  value: live && live.auto === true ? "On" : "Off" });
     }
     rows.push({ id: "account", label: "Account & usage…" });
     // Same affordance as the IDE extensions' "Switch account":
@@ -4989,9 +8563,23 @@ function setupAiPanel(hosted) {
       ai.menu.view = "model";
       ai.menu.sel = 1;
       slashRender(true);
+      // Drawn at once from what the CLI last said, then asked again: a
+      // model shipped since then appears while the menu is still open.
+      modelsSync(ai.agent);
     } else if (id.startsWith("model:")) {
       const chosen = id.slice(6);
       if (chosen === "__custom") { menuInsertText("/model "); slashRender(); return; }
+      if (chosen.startsWith("__update:")) {
+        const row = modelMenuRows(ai.agent).find((m) => m.id === chosen);
+        menuInsertText("");
+        if (row && row.cliUpdate) {
+          if (!row.busy) cliUpdate(ai.agent, true);
+        } else if (row) {
+          s.msgs.push({ kind: "note", text: modelUpdateNote(ai.agent, row) });
+        }
+        chatRender();
+        return;
+      }
       s.model = chosen;
       menuInsertText("");
       s.msgs.push({ kind: "note", text: `Model: ${modelLabel()}` });
@@ -5011,6 +8599,10 @@ function setupAiPanel(hosted) {
       menuInsertText(((ai.paths || {}).workspace || "") + "/strategy.py ");
     } else if (id.startsWith("mention:data:")) {
       menuInsertText(((ai.paths || {}).data || "") + "/" + id.slice(13) + " ");
+    } else if (id === "autoupdate") {
+      menuInsertText("");
+      const live = aiLiveModels[ai.agent];
+      setAutoUpdate(ai.agent, !(live && live.auto === true));
     } else if (id === "account") {
       menuInsertText("");
       ai.accountCard = ai.agent;
@@ -5061,7 +8653,7 @@ function setupAiPanel(hosted) {
         div.textContent = r.header;
       } else {
         div.className = "air-menu-item" + (i === ai.menu.sel ? " sel" : "") +
-                        (r.on ? " on" : "");
+                        (r.on ? " on" : "") + (r.off ? " off" : "");
         div.innerHTML =
           `<span class="air-menu-label">${aiEscape(r.label)}</span>` +
           (r.desc ? `<span class="air-menu-desc">${aiEscape(r.desc)}</span>`
@@ -5128,6 +8720,9 @@ function setupAiPanel(hosted) {
     s.msgs.push({ kind: "user", text, mode: stance ? stance.id : "" });
     persistChat(ai.agent); // a reload mid-turn keeps at least the question
     s.busy = true; // optimistic; the server echoes turn_start
+    // The brokers' terms of this moment, which the account and screen map
+    // below are cleaned by (SPEC 3.3).
+    await brokerRowsFresh();
     // Sync the workspace (editor + current view) BEFORE firing, awaited but
     // capped: the engine stamps this turn's screen note from context.json,
     // so a stale write here would tell the agent the previous page.
@@ -5139,7 +8734,12 @@ function setupAiPanel(hosted) {
     // sees the chart as it is NOW. Desktop shell only; capped so a capture
     // hiccup can never hold the send. 1500ms: a 4K window's PNG encode can
     // exceed the old 800ms cap, which silently shipped stale screenshots.
-    if (window.lseShell && window.lseShell.capture) {
+    // Not while the chart or the ticket shows a broker whose terms keep its
+    // prices on this computer: a picture of them reproduces them. The engine
+    // tells the agent why, and refuses the shell's capture itself too.
+    const shotWithheld = aiCaptureWithheld(brokerPicker.rows, state.provider,
+      (typeof tpb !== "undefined" && tpb) ? tpb.broker : "");
+    if (!shotWithheld && window.lseShell && window.lseShell.capture) {
       try {
         const cap = await Promise.race([window.lseShell.capture(),
           new Promise((r) => setTimeout(() => r({ ok: false, error: "capture timeout" }), 1500))]);
@@ -5314,6 +8914,9 @@ function setupAiPanel(hosted) {
         lastMsg.content += "\n\n[Attached by the terminal: the research " +
           "paper open on my screen]\n" + aiPaperLines(paper);
       }
+      // The context below leaves out a broker's prices when its terms keep
+      // them on this computer (SPEC 3.3), by the engine's rows of now.
+      await brokerRowsFresh();
       const r = await fetch("/api/assistant", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -5370,7 +8973,7 @@ function setupAiPanel(hosted) {
       }
     } catch (e) {
       if (!(e && e.name === "AbortError")) {
-        s.msgs.push({ kind: "error", text: String(e).slice(0, 200) });
+        s.msgs.push({ kind: "error", text: oneLine(e) || "error" });
       }
     } finally {
       bot.done = true;
@@ -5701,13 +9304,13 @@ function setupAiPanel(hosted) {
     const s = session(ai.agent);
     const menu = $("air-model-menu");
     menu.innerHTML = "";
-    // Same per-provider list as the "/" menu; non-Claude providers also get
-    // the typed-name row for anything outside the named lineup.
-    const models = modelsFor(ai.agent).concat(ai.agent === "claude" ? []
-      : [{ id: "__custom", name: "Custom model…", desc: "Type a model name" }]);
-    for (const m of models) {
+    // Same rows as the "/" menu: the CLI's own models, the ones that need
+    // a newer CLI, and the typed-name row for every provider.
+    for (const m of modelMenuRows(ai.agent)) {
       const row = document.createElement("button");
-      row.className = "air-auto-row" + ((s.model || "") === m.id ? " active" : "");
+      row.className = "air-auto-row" +
+        (m.needsUpdate ? " needs-update" : (s.model || "") === m.id ? " active" : "");
+      row.dataset.model = m.id;
       row.innerHTML = `<span class="air-auto-name">${aiEscape(m.name)}</span>` +
         `<span class="air-auto-desc">${aiEscape(m.desc || "")}</span>`;
       row.onclick = (e) => {
@@ -5717,6 +9320,15 @@ function setupAiPanel(hosted) {
           const input = $("air-input");
           input.value = "/model ";
           input.focus();
+          return;
+        }
+        if (m.cliUpdate) {
+          if (!m.busy) cliUpdate(ai.agent, true);
+          return;
+        }
+        if (m.needsUpdate) {
+          s.msgs.push({ kind: "note", text: modelUpdateNote(ai.agent, m) });
+          chatRender();
           return;
         }
         s.model = m.id;
@@ -5731,8 +9343,18 @@ function setupAiPanel(hosted) {
     setClose();
     autoClose();
     const menu = $("air-model-menu");
-    if (menu.classList.contains("hidden")) { renderModelMenu(); menu.classList.remove("hidden"); }
-    else modelClose();
+    if (!menu.classList.contains("hidden")) { modelClose(); return; }
+    renderModelMenu();
+    menu.classList.remove("hidden");
+    // The menu hangs from the button's right edge. A long provider name
+    // pushes the button left and the menu's left edge out of the rail,
+    // which cut the first letters off every row: keep it inside.
+    menu.style.right = "0px";
+    const cut = rail.getBoundingClientRect().left + 6 - menu.getBoundingClientRect().left;
+    if (cut > 0) menu.style.right = -cut + "px";
+    // Drawn at once from what the CLI last said, then asked again: a model
+    // shipped since then appears while the menu is still open.
+    modelsSync(ai.agent);
   };
 
   function setMode(mode) {
@@ -5778,6 +9400,10 @@ function setupAiPanel(hosted) {
     if (name === ai.agent) { renderPicker(); return; }
     ai.agent = name;
     renderPicker();
+    // Ask this provider's CLI for its models now, so the menu is already
+    // current when it is first opened (and the CLI itself, where the user
+    // turned that on).
+    modelsSync(name);
     updateModeUi();
     renderModeHint(); // each provider keeps its own stance
     if (name === "lse") {
@@ -5812,7 +9438,7 @@ function setupAiPanel(hosted) {
       menuClose();
     }
   };
-  $("air-send").onclick = sendChat;
+  $("air-send").onclick = () => sendChat();
   $("air-stop").onclick = () => {
     const s = session(ai.agent);
     if (ai.agent === "lse") {
@@ -6311,7 +9937,7 @@ function renderLibraryTree(el, ctx) {
   const lseRow = document.createElement("div");
   lseRow.className = "tree-actions";
   lseRow.innerHTML =
-    `<button id="tree-lse" title="Browse the LSE databank and download full history into your library">` +
+    `<button id="tree-lse" title="Browse the LSE databank and download available history into your library">` +
     `${TREE_ICO.lse}<span>Import via LSE Data</span></button>`;
   el.appendChild(lseRow);
   lseRow.querySelector("#tree-lse").onclick = () => openLsbModal();
@@ -7232,9 +10858,8 @@ function showMdError(msg) {
 }
 
 /* ---------- LSE databank import (library > Import via LSE) ----------
-   Browse the vault catalog, pick, download. The engine does the heavy part
-   (submit export, poll, pull Parquet, land it in the library); this modal is
-   only the picker plus a job status line. */
+   Browse supported market candles and series, then download complete pages
+   into the library. The modal shows the selection and import progress. */
 
 const lsb = { meta: null, ref: [], usage: null, dataset: null, row: null,
               timer: null, seq: 0, tf: "1h", range: "max" };
@@ -7355,7 +10980,7 @@ function lsbPickSet(ds) {
   if (lsbIsCandle(ds)) {
     const tfs = ds === "options" ? (lsb.meta.options_timeframes || [])
                                  : (lsb.meta.timeframes || []);
-    const all = ["tick", ...tfs];
+    const all = [...tfs];
     // The picked timeframe survives dataset hops when the new dataset offers
     // it; otherwise fall back to the 1h default.
     if (!all.includes(lsb.tf)) lsb.tf = all.includes("1h") ? "1h" : all[0];
@@ -7453,7 +11078,7 @@ function renderLsbTf(tfs) {
     b.onclick = () => {
       lsb.tf = t;
       for (const x of el.children) x.classList.toggle("sel", x === b);
-      setLsbDetail(); // the tick note lives in the info line
+      setLsbDetail();
     };
     el.appendChild(b);
   }
@@ -7499,7 +11124,7 @@ function lsbApplyRange() {
   if (lsb.range) {
     const s = $("lsb-start"), e = $("lsb-end");
     if (lsb.range === "max") {
-      s.value = e.value = ""; // empty dates = the vault's full history
+      s.value = e.value = ""; // empty dates = all history available at this interval
     } else {
       // Anchor to the selection's last data day when known, else today.
       const anchor = s.max ? new Date(s.max + "T00:00:00Z") : new Date();
@@ -7523,13 +11148,10 @@ function setLsbDetail() {
   } else if (lsb.row) {
     const r = lsb.row;
     info.textContent = `${r.symbol}  ${r.name || ""}\n` +
-      (r.ticks ? `${lsbFmtN(r.ticks)} ticks` : "") +
+      (r.ticks ? `${lsbFmtN(r.ticks)} recorded rows` : "") +
       (r.first_tick ? `, ${String(r.first_tick).slice(0, 10)} to ` +
         `${String(r.last_tick).slice(0, 10)}` : "") +
-      (lsb.dataset === "options"
-        ? "\nOption pulls keep per-contract fidelity as Parquet files." : "") +
-      (lsbIsCandle(lsb.dataset) && lsb.tf === "tick"
-        ? "\ntick: the raw ticks, saved as a Parquet file." : "");
+      "\nAvailability depends on the selected interval and your key. The To date includes that day.";
   } else {
     info.textContent = "Pick an instrument to see its history span.";
   }
@@ -7539,7 +11161,7 @@ function lsbWatch(jobId) {
   clearInterval(lsb.timer);
   const st = $("lsb-status");
   st.classList.remove("hidden", "err");
-  st.textContent = "Export submitted; the vault is building your file";
+  st.textContent = "Reading available data";
   lsb.timer = setInterval(async () => {
     let job;
     try {
@@ -7556,7 +11178,7 @@ function lsbWatch(jobId) {
     if (job.status === "done") {
       st.textContent = `Imported ${job.entry.symbol}: ` +
         `${lsbFmtN(job.entry.rows)} rows` +
-        (job.bytes ? ` (${lsbFmtB(job.bytes)} over the wire)` : "") + ".";
+        (job.file_bytes ? ` (${lsbFmtB(job.file_bytes)} stored)` : "") + ".";
       status(`imported ${job.entry.symbol} from LSE`);
       await refreshLibraryAll();
     } else if (job.status === "saved") {
@@ -7592,7 +11214,7 @@ function setupLsbModal() {
     const body = {
       dataset: lsb.dataset,
       symbol: lsbIsRef(lsb.dataset) ? "" : (lsb.row && lsb.row.symbol) || "",
-      timeframe: lsbIsCandle(lsb.dataset) ? lsb.tf : "tick",
+      timeframe: lsbIsCandle(lsb.dataset) ? lsb.tf : "1h",
       start: $("lsb-start").value, end: $("lsb-end").value,
       folder: $("lsb-folder").value.trim(),
     };
@@ -8049,7 +11671,10 @@ function askText(title, def = "") {
   });
 }
 
-function askConfirm(title) {
+/* `okLabel` / `cancelLabel` name the two answers when OK and Cancel would not
+   say what each one does (the live-money question: "Allow trading" or
+   "Connect read-only"). Set as text, like the title. */
+function askConfirm(title, okLabel, cancelLabel, terms) {
   return new Promise((resolve) => {
     const wrap = document.createElement("div");
     wrap.className = "modal-wrap";
@@ -8057,6 +11682,16 @@ function askConfirm(title) {
       `<div class="modal-row"><button class="modal-ok">OK</button>` +
       `<button class="modal-cancel">Cancel</button></div></div>`;
     wrap.querySelector(".modal-title").textContent = title;
+    // Arming a live connection: the broker's terms under the question, as
+    // text, with the link to read them (SPEC 3.3). Nothing for a broker whose
+    // terms say nothing, so every other question looks as it did.
+    const tl = csTermsLine(terms);
+    if (tl) {
+      tl.classList.add("modal-terms");
+      wrap.querySelector(".modal-title").after(tl);
+    }
+    if (okLabel) wrap.querySelector(".modal-ok").textContent = okLabel;
+    if (cancelLabel) wrap.querySelector(".modal-cancel").textContent = cancelLabel;
     document.body.appendChild(wrap);
     const done = (v) => { wrap.remove(); resolve(v); };
     wrap.querySelector(".modal-ok").onclick = () => done(true);
@@ -8452,8 +12087,7 @@ async function openBacktest(mode) {
   $("side").classList.remove("hidden");
   renderSubrail("backtest", null);
   // scrpage was missing from this sweep: SCREENER -> BACKTEST left the
-  // screener section un-hidden underneath (found by an AI
-  // vision simulation, whose screen map reported two pages visible at once).
+  // screener section un-hidden underneath (two pages visible at once).
   for (const id of ["optpage", "news", "mydata", "econcal", "dataviz", "nbpage", "mlpage",
                     "pyide", "wsx", "charts", "backtest", "lse-connect",
                     "research", "guide", "scrpage"]) {
@@ -8549,6 +12183,13 @@ const SUBRAIL = {
   workspace: [
     { id: "sub-ws-ide", label: "IDE",
       go: () => $("rail-workspace").click() },
+    // (dash/dash.js: boards of widgets the user codes against the
+    // terminal's data, each in a sandboxed frame)
+    { id: "sub-ws-dash", label: "DASHBOARD",
+      desc: "Your own boards of widgets. A widget is a few lines of " +
+        "JavaScript that reads the terminal's data (prices, bars, option " +
+        "chains, economic series, your own files) and draws it.",
+      go: () => openDash() },
     { id: "sub-ws-dataviz", label: "DATA VISUALISATION",
       go: () => openDataViz() },
     { id: "sub-ws-notebooks", label: "NOTEBOOK",
@@ -8574,10 +12215,15 @@ const SUBRAIL = {
 function renderSubrail(section, activeId) {
   const bar = $("subrail");
   const items = SUBRAIL[section];
+  // WORKSPACE > DASHBOARD is the one page no section's own sweep hides: it
+  // follows the lit sub-view, here and in subrailMark, the two places every
+  // change of view passes through.
+  if (typeof dashSyncView === "function") dashSyncView(items ? activeId : null);
   if (!items) {
     bar.classList.add("hidden");
     bar.innerHTML = "";
     aiPanelRefreshEmpty();
+    viewSyncAddress();
     return;
   }
   bar.classList.remove("hidden");
@@ -8593,6 +12239,7 @@ function renderSubrail(section, activeId) {
     bar.appendChild(b);
   }
   aiPanelRefreshEmpty(); // the assistant's hero states the section it sees
+  viewSyncAddress();
 }
 
 /* Highlight one sub-tab (or none) without rebuilding the bar. The mode
@@ -8603,7 +12250,9 @@ function subrailMark(activeId) {
   for (const b of document.querySelectorAll(".subrail-btn")) {
     b.classList.toggle("active", b.id === activeId);
   }
+  if (typeof dashSyncView === "function") dashSyncView(activeId);
   aiPanelRefreshEmpty(); // the hero states the section it sees
+  viewSyncAddress();
 }
 
 /* WORKSPACE > DATA VISUALISATION: a React island (chart builder for arbitrary
@@ -8617,7 +12266,7 @@ function openDataViz() {
   document.title = "Data Visualisation · LSE Terminal";
   $("side").classList.add("hidden");
   renderSubrail("workspace", "sub-ws-dataviz");
-  // scrpage joined this sweep with openBacktest's (same finding:
+  // scrpage joined this sweep with openBacktest's (the same case:
   // SCREENER -> DATA VISUALISATION left the screener rendered underneath).
   for (const id of ["optpage", "news", "charts", "backtest", "mydata",
                     "econcal", "nbpage", "mlpage", "pyide", "wsx", "lse-connect",
@@ -8671,7 +12320,16 @@ function openNotebookById(id) {
    short answers and has no list or paragraph model; the contents column
    on the left is built from the ## / ### headings and follows the scroll. */
 const gd = { md: null, loading: null, heads: [], spyBound: false, pin: null, pinSeen: false,
-             hits: [], hitAt: -1, linksBound: false, hoverT: null };
+             hits: [], hitAt: -1, linksBound: false, hoverT: null, goTo: null };
+
+/* Open the walkthrough AT one heading, by its id (gdSlug of its title): how
+   a screen elsewhere in the app sends the reader to the part that answers
+   them. The jump is made when the guide is drawn, which the first time is
+   after guide.md has arrived (gdRender). */
+function gdOpenAt(id) {
+  gd.goTo = id;
+  $("rail-guide").click();
+}
 
 function gdOpen() {
   if (gd.md !== null) { gdRender(); return; }
@@ -8682,6 +12340,7 @@ function gdOpen() {
     .then((r) => (r.ok ? r.text() : Promise.reject(new Error("HTTP " + r.status))))
     .then((t) => { gd.md = t; gdRender(); })
     .catch((e) => {
+      gd.goTo = null;
       $("gd-doc").innerHTML = '<div class="news-empty">The guide could not ' +
         "be loaded (" + aiEscape(String(e.message || e)) + ").</div>";
     })
@@ -9126,6 +12785,16 @@ function gdRender() {
     $("gd-main").addEventListener("scroll", gdSpy, { passive: true });
   }
   gdSpy();
+  gdGoToPending();
+}
+
+/* Opened at a heading (gdOpenAt): go there once the guide is drawn, and
+   only once. */
+function gdGoToPending() {
+  if (!gd.goTo) return;
+  const id = gd.goTo;
+  gd.goTo = null;
+  gdJump(id, true);
 }
 
 /* ---- Guide search: highlight every match in the document, count hits per
@@ -11447,7 +15116,10 @@ function setupRail() {
     // (conn bar) lists custom sources and switches to them. The sidebar is
     // cleared explicitly: a visit to MY DATA/BACKTEST leaves the user's
     // library rendered there.
-    if (!state.lseConfigured && !isLiveSource(state.provider)) {
+    // (marketsWantsKey: the same decision a source switch makes again, so
+    // the view does not depend on whether this click or the boot's source
+    // came first)
+    if (marketsWantsKey()) {
       renderConnBar();
       const wl = $("watchlist");
       wl.innerHTML =
@@ -11609,6 +15281,9 @@ function setupRail() {
    the live instrument catalog first, so a typo surfaces here as an error
    instead of later as a silently empty watchlist. */
 function setupLseConnect() {
+  // the form's key box: no browser offers to save it (csSecretBox; the
+  // markup's own class masks it before this runs)
+  csSecretBox($("lse-key"));
   const showErr = (msg) => {
     const e = $("lse-key-err");
     e.textContent = msg;
@@ -11634,6 +15309,7 @@ function setupLseConnect() {
         try { why = (await r.json())?.detail || ""; } catch { /* non-JSON body */ }
         throw new Error(why || `could not save the key (HTTP ${r.status})`);
       }
+      resetPricePollKey();
       const probe = await fetch("/api/instruments?provider=lse&query=&limit=1");
       if (!probe.ok) {
         throw new Error("The LSE API rejected this key. Check for typos and try again.");
@@ -11985,7 +15661,9 @@ function mlInstallLine(f) {
   if (f.stage === "collect") return `Resolving ${f.package}…`;
   if (f.stage === "install") return `Installing ${f.count} package${f.count === 1 ? "" : "s"}…`;
   if (f.stage === "done") return "Installed: " + (f.packages || []).join(" ");
-  return (f.line || "").slice(0, 160);
+  // pip's own line, whole: a library row's cell cuts it with "…" and keeps
+  // it as its tooltip (mlInstall)
+  return oneLine(f.line);
 }
 
 /* One installer for the banner and the panel: streams pip through the
@@ -12006,6 +15684,9 @@ function mlInstall(pkgs) {
       if (pkgs.includes(row.dataset.lib)) {
         const st = row.querySelector(".ml-lib-status");
         st.textContent = line; st.className = "ml-lib-status busy";
+        // the cell is one grid column: it cuts a long line with "…", and
+        // the whole line is here
+        st.title = line;
       }
     }
   };
@@ -14449,6 +18130,7 @@ async function boot() {
   refreshDatasets().catch(() => {});
   setupLsbModal();
   setupRail();
+  setupWindows(!!config.hosted);
   setupLseConnect();
   setupConnBar();
   setupLayouts();
@@ -14558,18 +18240,31 @@ async function boot() {
     location.reload();
   };
 
-  // Watchlist price board poll: once a second for the rows on screen
-  // (pollPrices itself skips hidden windows and stacked requests).
-  setInterval(pollPrices, 1000);
+  // At most 20 watchlist calls/minute; the demo broker separately budgets 30.
+  // Render primes share the same gate, leaving headroom even on a 60/min key.
+  setInterval(pollPrices, PRICE_POLL_INTERVAL_MS);
 
   $("symbol").addEventListener("input", (e) => loadInstruments(e.target.value));
-  $("symbol").addEventListener("change", (e) => {
-    if (e.target.value) { setSymbol(e.target.value.trim()); e.target.blur(); }
+  // Enter takes the exact match, whatever case was typed, or else the first
+  // suggestion (pickTypedSymbol). `change` is the same pick by another road:
+  // an option chosen from the list, or the box left with text in it.
+  $("symbol").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || e.isComposing) return;
+    e.preventDefault();
+    pickTypedSymbol(e.target);
   });
+  $("symbol").addEventListener("change", (e) => pickTypedSymbol(e.target));
 
   // Land on MARKETS: live LSE data when a key is set, otherwise the
   // connect-key form. The rail handler owns that branch.
   $("rail-markets").click();
+  // the header is drawn whole now: a Connections sheet may hang from it
+  csLand();
+  // A window opened on a view (another monitor's window, a reload, the
+  // desktop app bringing its windows back) goes to it.
+  if (lseWin.view) {
+    try { viewOpen(lseWin.view); } catch (e) { /* stays on MARKETS */ }
+  }
 
   // (The old ?ai=open deep link is gone: the AI rail is permanent now.)
 }
@@ -14582,11 +18277,21 @@ try {
     $("ai-rail").classList.add("collapsed");
 } catch (e) { /* storage disabled: start expanded */ }
 
-boot().catch((e) => status(`boot failed: ${e}`));
+// (a boot that failed lands too: the Connections screen does not wait on it)
+boot().catch((e) => status(`boot failed: ${e}`)).finally(() => csLand());
 
 /* ── trade panel (MARKETS right-rail): the demo-broker ticket ────────────── */
 const tpx = { acct: null, timer: null, dockTab: "pos", fills: null, positions: [],
-              orders: [] };
+              orders: [],
+              // an order out from the ticket (Buy and Sell held until its
+              // answer); requests whose outcome is not known (tpxHold); and
+              // the dock's closes and cancels out (one press, one request)
+              placing: false, held: [], inflight: new Set(),
+              // this page's own requests on their way (client_id -> what was
+              // sent) and every client_id it sent (-> the record's read
+              // number when its answer came; Infinity while it is out), and
+              // the engine's record as last read (tpxFetchHeld)
+              sending: new Map(), mine: new Map(), record: null, heldSeq: 0, heldApplied: 0 };
 
 /* ── chart position overlays: interactive order lines on the pro chart ────
    Every open position on the charted symbol becomes an engine order line:
@@ -14637,13 +18342,14 @@ async function acdModifyFromChart(id, sl, tp) {
           body: JSON.stringify({ account_id: tpx.acct.id, symbol: p.symbol,
             sl_price: sl == null ? null : sl, tp_price: tp == null ? null : tp }) });
     if (!r.ok) {
+      // The broker's reason whole, as an order's is.
       const e = await r.json().catch(() => ({}));
-      tpxSetMsg(String(e.detail || "SL/TP rejected").slice(0, 80), "err");
+      tpxSay(tpbPlainReason(String(e.detail || "SL/TP rejected")), "err");
     } else {
-      tpxSetMsg("SL/TP updated", "ok");
+      tpxSay("SL/TP updated", "ok");
     }
   } catch (e) {
-    tpxSetMsg("SL/TP update failed", "err");
+    tpxSay("SL/TP update failed", "err");
   }
   tpxRefreshPositions(); // re-pull so the line snaps to the accepted values
 }
@@ -14722,12 +18428,13 @@ function acdRenderPositions(poss) {
     // partial closes, full close); the × cell stops propagation
     tr.onclick = (ev) => acdShowPosMenu(ev, p);
     tr.oncontextmenu = (ev) => acdShowPosMenu(ev, p);
+    // p.symbol is the broker's own spelling of the instrument: escaped
     tr.innerHTML =
-      `<td>${p.symbol}</td>` +
+      `<td>${escHtml(p.symbol)}</td>` +
       `<td class="${p.qty > 0 ? "p-pos" : "p-neg"}">${p.qty > 0 ? "Buy" : "Sell"}</td>` +
       `<td>${Math.abs(p.qty)}</td>` +
-      `<td>${fmt(p.avg_price)}</td>` +
-      `<td>${cur == null ? "–" : fmt(cur)}</td>` +
+      `<td>${acdPx(p.symbol, p.avg_price)}</td>` +
+      `<td>${cur == null ? "–" : acdPx(p.symbol, cur)}</td>` +
       `<td class="${p.unrealized_pnl >= 0 ? "p-pos" : "p-neg"}">${acdPnl(p.unrealized_pnl)}</td>`;
     const td = document.createElement("td");
     const x = document.createElement("button");
@@ -14784,64 +18491,153 @@ function acdSelectOnChart(p) {
   // is still the way into edit mode when the user wants it.
 }
 
-async function acdClosePart(p, frac) {
-  if (!tpx.acct) return;
+// The same close or cancel pressed again while it is out is not a second one.
+async function tpxOnce(key, fn) {
+  if (tpx.inflight.has(key)) return;
+  tpx.inflight.add(key);
+  try { return await fn(); } finally { tpx.inflight.delete(key); }
+}
+
+// A close or cancel sent to the broker (asked again: `again`). True when it
+// was answered; false when its outcome is not known (held, with "Ask again")
+// or it was refused, both said on the ticket's line. `about` is what it is
+// about: its instrument, and a cancel's order, kept with it while it is held
+// (tpxHeldOverlap, tpxHeldName).
+async function acdSend(kind, url, body, label, run, again, about) {
+  const hold = (res, engine) => tpxHold({ kind, broker: body.broker,
+    body: { ...body, client_id: (res && res.client_id) || body.client_id },
+    ...(about || {}), engine: !!engine, words: res && res.detail, run,
+    stillUnknown: !!again && !engine });
+  let r, res;
+  const answered = tpxSending(kind, body, about);
+  try {
+    r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
+                           body: JSON.stringify(body) });
+  } catch (e) {
+    answered();
+    hold({ detail: String(e.message || e) }, true);
+    return false;
+  }
+  answered();
+  if (kind === "cancel" && (r.status === 404 || r.status === 405)) {
+    // the cancel route is newer than the running engine (see tpxPlacePending)
+    tpxSay("engine update needed for pending orders", "err");
+    return false;
+  }
+  res = await readResult(r);
+  // settled: answered, or refused by the broker for good (as tpbOrder)
+  const settled = r.ok || (r.status === 400 && !res.retryable);
+  if (!settled && res.unknown) {
+    hold(res, false);
+    return false;
+  }
+  // asked again on another account than its own: Switch back (tpxOtherAccount)
+  if (again && tpxOtherAccount((tpx.held || []).find((x) => x.body.client_id === body.client_id)
+                               || { broker: body.broker, body }, r.status, res)) return false;
+  if (!settled && again) {
+    tpxSay(tpbPlainReason(String(res.detail || r.status)), "err");
+    return false;
+  }
+  tpxHeldDone(body.client_id);
+  if (!r.ok) {
+    tpxSay(tpbPlainReason(String(res.detail || r.status)), "err");
+    return false;
+  }
+  tpxSay(label, "ok");
+  return true;
+}
+
+// The close a dock or chart press asks for, settled against what is held:
+// the same close of the position asks again, any other request on its
+// instrument only on a yes (tpxHeldGate). Asked again by "Ask again",
+// `again` is the held one. `symbol` is the position's instrument.
+async function acdCloseSend(want, again, label, run, symbol) {
+  await tpxOnce("close:" + want.position_id, async () => {
+    let body = want;
+    if (!again) {
+      const go = await tpxHeldGate("close", want, "close", "Close it", symbol);
+      if (!go) return;
+      body = go.body;
+      again = go.again;
+    }
+    tpxSetMsg(again ? "asking again…" : label.going);
+    await acdSend("close", "/api/broker/close", body,
+                  `${again ? "Asked again: " : ""}${label.done}`, run, !!again, { symbol });
+    tpxRefreshAccount(); tpxRefreshPositions();
+  });
+}
+
+async function acdClosePart(p, frac, again) {
+  // (Asked again, it needs no account read yet: what was sent goes again.)
+  if (!tpx.acct && !again) return;
   const qty = Math.abs(p.qty) * frac;
+  if (tpbViaConnector()) {
+    // SPEC position.close with qty. The broker validates the fraction
+    // against its own qty_step and refuses a bad one in words; rounding
+    // it here would be this panel silently closing a different amount
+    // than the user chose. Asked again, exactly what was sent: the
+    // position may already be smaller by it.
+    const want = again ? { ...again.body } : { broker: tpb.broker,
+      position_id: String(p.position_id || p.id), qty };
+    const pct = Math.round(frac * 100);
+    await acdCloseSend(want, again, { going: `closing ${pct}% of ${p.symbol}…`,
+                                      done: `closed ${pct}% of ${p.symbol}` },
+                       (h) => acdClosePart(p, frac, h), p.symbol);
+    return;
+  }
   tpxSetMsg(`closing ${Math.round(frac * 100)}% of ${p.symbol}…`);
   try {
-    let r;
-    if (tpbViaConnector()) {
-      // SPEC position.close with qty. The broker validates the fraction
-      // against its own qty_step and refuses a bad one in words; rounding
-      // it here would be this panel silently closing a different amount
-      // than the user chose.
-      r = await fetch("/api/broker/close", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ broker: tpb.broker,
-          position_id: String(p.position_id || p.id), qty }),
-      });
-      const res = await readResult(r);
-      if (!r.ok) throw new Error(res.detail || r.status);
-      tpxSetMsg(`closed ${Math.round(frac * 100)}% of ${p.symbol}`, "ok");
-    } else {
-      const side = p.qty > 0 ? "sell" : "buy"; // reduce, never flip
-      r = await fetch("/api/sim/orders", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ account_id: tpx.acct.id, symbol: p.symbol, side, otype: "market", qty }),
-      });
-      const res = await readResult(r);
-      if (!r.ok) throw new Error(res.detail || r.status);
-      tpxSetMsg(res.status === "filled" ? `closed ${Math.round(frac * 100)}% of ${p.symbol}`
-        : `${res.status}${res.reason ? ": " + res.reason : ""}`,
-        res.status === "filled" ? "ok" : "err");
-    }
+    const side = p.qty > 0 ? "sell" : "buy"; // reduce, never flip
+    const r = await fetch("/api/sim/orders", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ account_id: tpx.acct.id, symbol: p.symbol, side, otype: "market", qty }),
+    });
+    const res = await readResult(r);
+    if (!r.ok) throw new Error(res.detail || r.status);
+    tpxSetMsg(res.status === "filled" ? `closed ${Math.round(frac * 100)}% of ${p.symbol}`
+      : `${res.status}${res.reason ? ": " + res.reason : ""}`,
+      res.status === "filled" ? "ok" : "err");
   } catch (e) {
-    tpxSetMsg(String(e.message || e).slice(0, 80), "err");
+    // the demo account's reason whole, as a broker's is
+    tpxSetMsg(String(e.message || e), "err");
   }
   tpxRefreshAccount(); tpxRefreshPositions();
 }
 
-async function acdCloseFull(p) {
-  if (!tpx.acct) return;
+async function acdCloseFull(p, again) {
+  if (!tpx.acct && !again) return;
+  if (tpbViaConnector()) {
+    const want = again ? { ...again.body } : { broker: tpb.broker,
+      position_id: String(p.position_id || p.id) };
+    // A close of part of the position asked again from here (one restored
+    // from the engine's record, tpxRestoreHeld) says how much.
+    const what = want.qty != null ? `${want.qty} of ${p.symbol}` : p.symbol;
+    await acdCloseSend(want, again, { going: `closing ${what}…`, done: `closed ${what}` },
+                       (h) => acdCloseFull(p, h), p.symbol);
+    return;
+  }
   try {
-    if (tpbViaConnector()) {
-      const r = await fetch("/api/broker/close", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ broker: tpb.broker,
-          position_id: String(p.position_id || p.id) }),
-      });
-      if (!r.ok) {
-        const res = await readResult(r);
-        throw new Error(res.detail || r.status);
-      }
-    } else {
-      await fetch(`/api/sim/close?account_id=${tpx.acct.id}&symbol=${encodeURIComponent(p.symbol)}`, { method: "POST" });
-    }
+    await fetch(`/api/sim/close?account_id=${tpx.acct.id}&symbol=${encodeURIComponent(p.symbol)}`, { method: "POST" });
     tpxSetMsg(`closed ${p.symbol}`, "ok");
   } catch (e) {
-    tpxSetMsg(String(e.message || e).slice(0, 80), "err");
+    tpxSetMsg(String(e.message || e), "err");
   }
   tpxRefreshAccount(); tpxRefreshPositions();
+}
+
+// A held close's position as the dock lists it, or, when the dock does not
+// (yet) list it, one named by what was sent: the close it is asked again is
+// the request as it was sent either way.
+function acdHeldPosition(h) {
+  const id = String(h.body.position_id);
+  return (tpx.positions || []).find((p) => String(p.position_id || p.id) === id)
+    || { id, position_id: id, symbol: tpxHeldSymbol(h) || id };
+}
+
+// A held cancel's order as the Orders tab lists it, else one named by its id.
+function acdHeldOrder(h) {
+  const id = String(h.body.order_id);
+  return (tpx.orders || []).find((o) => String(o.id) === id) || { id, symbol: tpxHeldSymbol(h) };
 }
 
 function acdShowPosMenu(ev, p) {
@@ -14895,8 +18691,16 @@ async function acdRenderHistory() {
       if (!r.ok) {
         const e = await readResult(r);
         if (tpx.dockTab !== "hist") return;
-        $("acd-body").innerHTML = `<div class="acd-empty">History unavailable: ${
-          String(e.detail || r.status).slice(0, 120)}</div>`;
+        // The broker's words whole, on one line, without the protocol's code
+        // word in front (tpbPlainReason), and as text: they are its words,
+        // never markup on this page.
+        const host = $("acd-body");
+        host.innerHTML = "";
+        const note = document.createElement("div");
+        note.className = "acd-empty";
+        note.textContent = "History unavailable: "
+          + tpbPlainReason(String(e.detail || r.status).replace(/\s+/g, " ").trim());
+        host.appendChild(note);
         return;
       }
       fills = await r.json();
@@ -14935,9 +18739,9 @@ async function acdRenderHistory() {
     const when = f.ts ? new Date(f.ts).toLocaleString(undefined,
       { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
     tr.innerHTML =
-      `<td>${when}</td><td>${f.symbol}</td>` +
+      `<td>${when}</td><td>${escHtml(f.symbol)}</td>` +
       `<td class="${f.side === "buy" ? "p-pos" : "p-neg"}">${f.side === "buy" ? "Buy" : "Sell"}</td>` +
-      `<td>${f.qty}</td><td>${fmt(f.price)}</td>` +
+      `<td>${escHtml(f.qty)}</td><td>${acdPx(f.symbol, f.price)}</td>` +
       `<td class="${f.realized_pnl > 0 ? "p-pos" : f.realized_pnl < 0 ? "p-neg" : ""}">` +
       `${f.realized_pnl == null ? "" : acdPnl(f.realized_pnl)}</td>`;
     tb.appendChild(tr);
@@ -15002,12 +18806,12 @@ function acdRenderOrders(orders) {
     const tr = document.createElement("tr");
     tr.className = "acd-row";
     tr.innerHTML =
-      `<td>${o.symbol}</td>` +
-      `<td>${o.otype}</td>` +
+      `<td>${escHtml(o.symbol)}</td>` +
+      `<td>${escHtml(o.otype)}</td>` +
       `<td class="${o.side === "buy" ? "p-pos" : "p-neg"}">${o.side === "buy" ? "Buy" : "Sell"}</td>` +
-      `<td>${o.qty}</td>` +
-      `<td>${o.price == null ? "–" : fmt(o.price)}</td>` +
-      `<td>${cur == null ? "–" : fmt(cur)}</td>`;
+      `<td>${escHtml(o.qty)}</td>` +
+      `<td>${o.price == null ? "–" : acdPx(o.symbol, o.price)}</td>` +
+      `<td>${cur == null ? "–" : acdPx(o.symbol, cur)}</td>`;
     const td = document.createElement("td");
     const x = document.createElement("button");
     x.className = "acd-close";
@@ -15025,13 +18829,40 @@ function acdRenderOrders(orders) {
   host.appendChild(t);
 }
 
-async function acdCancelOrder(o) {
+async function acdCancelOrder(o, again) {
+  if (tpbViaConnector()) {
+    // The order's instrument goes beside its id: the engine keeps it with a
+    // cancel whose answer has not come, so a page loaded later knows what
+    // the cancel is about before its Orders tab has read the order.
+    const want = again ? { ...again.body } : { broker: tpb.broker, order_id: String(o.id),
+      ...(o.symbol != null && o.symbol !== "" ? { symbol: String(o.symbol) } : {}) };
+    // An order the Orders tab does not list (a cancel restored from the
+    // engine's record, acdHeldOrder) is named by its id.
+    const what = o.side ? `${o.side} ${o.otype} @ ${o.price == null ? "" : acdPx(o.symbol, o.price)}`
+      : `order ${want.order_id}`;
+    await tpxOnce("cancel:" + want.order_id, async () => {
+      let body = want;
+      if (!again) {
+        // The x on an order whose cancel may have been carried out is that
+        // cancel asked again, under its client_id; any other request on
+        // the order's instrument only on a yes (tpxHeldGate).
+        const go = await tpxHeldGate("cancel", want, "cancel", "Cancel it", o.symbol);
+        if (!go) return;
+        body = go.body;
+        again = go.again;
+      }
+      if (again) tpxSetMsg("asking again…");
+      await acdSend("cancel", "/api/broker/order/cancel", body,
+                    `${again ? "Asked again: " : ""}${what} cancelled`,
+                    (h) => acdCancelOrder(o, h), !!again,
+                    { symbol: o.symbol, order: o.side ? { side: o.side, otype: o.otype, price: o.price,
+                                                          symbol: o.symbol } : null });
+      tpxRefreshAccount(); tpxRefreshOrders();
+    });
+    return;
+  }
   try {
-    const r = tpbViaConnector()
-      ? await fetch("/api/broker/order/cancel", { method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ broker: tpb.broker, order_id: String(o.id) }) })
-      : await fetch("/api/sim/orders/cancel", { method: "POST",
+    const r = await fetch("/api/sim/orders/cancel", { method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ account_id: tpx.acct.id, order_id: o.id }) });
     // same old-engine shape as placement: 404/405 = the route is newer than
@@ -15041,9 +18872,9 @@ async function acdCancelOrder(o) {
     }
     const res = await readResult(r);
     if (!r.ok) throw new Error(res.detail || r.status);
-    tpxSetMsg(`${o.side} ${o.otype} @ ${o.price == null ? "" : fmt(o.price)} cancelled`, "ok");
+    tpxSetMsg(`${o.side} ${o.otype} @ ${o.price == null ? "" : acdPx(o.symbol, o.price)} cancelled`, "ok");
   } catch (e) {
-    tpxSetMsg(tpbPlainReason(String(e.message || e)).slice(0, 80), "err");
+    tpxSetMsg(tpbPlainReason(String(e.message || e)), "err");
   }
   tpxRefreshAccount(); tpxRefreshOrders();
 }
@@ -15078,7 +18909,18 @@ function tpxTradeInfo() {
       ? (o.pending_types || []).filter((t) => t === "limit" || t === "stop")
       : [];
   }
+  // The instrument an order from the chart's menu is placed on, and the places
+  // and tick it is placed at: the ticket's own instrument through a connector,
+  // the chart's own symbol on the sim. The menu offers its order rows only when
+  // the chart shows this instrument (a bare-symbol match), fills the form at
+  // these places snapped to this tick (the chart source's only when none is
+  // declared), and names it in every line it places; so a chart of one
+  // instrument never trades another at the other's price.
+  const spec = tpbViaConnector() ? tpbSpec() : null;
+  const digits = spec && Number.isInteger(spec.digits) && spec.digits >= 0 && spec.digits <= 20 ? spec.digits : null;
+  const tick = spec && spec.tick_size > 0 && isFinite(spec.tick_size) ? spec.tick_size : null;
   return { available: true, symbol: state.symbol,
+           instrument: spec ? spec.symbol : state.symbol, digits, tick,
            qty: qty > 0 ? qty : null, pendingTypes };
 }
 
@@ -15087,26 +18929,61 @@ async function tpxQuickOrder(side, otype, price, qty) {
   return tpxPlacePending(side, otype, price, qty);
 }
 
-async function tpxPlacePending(side, otype, price, qtyOverride) {
-  if (!(price > 0)) { tpxSetMsg("no price at cursor", "err"); return; }
+async function tpxPlacePending(side, otype, price, qtyOverride, again, fresh) {
+  if (!(price > 0)) { tpxSay("no price at cursor", "err"); return; }
   // The menu's order form carries its own size; absent (older bundle, or a
   // future caller that has none) the ticket's box stays the answer.
   const qty = qtyOverride > 0 ? qtyOverride : parseFloat($("tpx-qty").value);
-  if (!(qty > 0)) { tpxSetMsg("qty must be > 0", "err"); return; }
-  tpxSetMsg("placing…");
-  let status, reason;
+  if (!(qty > 0)) { tpxSay("qty must be > 0", "err"); return; }
+  // one order at a time from the ticket and its menu (tpxOrder)
+  if (tpx.placing) return;
+  tpxPlacing(true);
+  let status, reason, placedOn = state.symbol;
   try {
     if (tpbViaConnector()) {
-      const spec = tpbSpec();
-      if (!spec) throw new Error("no broker symbol");
+      let body;
+      if (again) {
+        body = { ...again.body };
+      } else if (fresh) {
+        // "Place as new" (tpxPlaceNew): what was sent, under a client_id of
+        // its own, after the question it asked.
+        body = { ...fresh, client_id: tpxNewClientId("") };
+      } else {
+        const spec = tpbSpec();
+        if (!spec) throw new Error("no broker symbol");
+        // As an order at market (tpbOrder): the same resting order again
+        // while its outcome is not known is asked again under its
+        // client_id; any other request on its instrument meanwhile only on
+        // a yes.
+        const go = await tpxHeldGate("pending",
+          { broker: tpb.broker, symbol: spec.symbol, side, qty, type: otype, price },
+          "", "Place it", spec.symbol);
+        if (!go) return;
+        body = go.body;
+        again = go.again;
+      }
+      tpxSetMsg(again ? "asking again…" : "placing…");
+      const hold = (res, engine) => tpxHold({ kind: "pending", broker: body.broker,
+        body: { ...body, client_id: (res && res.client_id) || body.client_id },
+        side: body.side, symbol: body.symbol, engine: !!engine, words: res && res.detail,
+        stillUnknown: !!again && !engine,
+        run: (h) => tpxPlacePending(h.side, h.body.type, h.body.price, h.body.qty, h) });
       // Its own endpoint, NOT a `type` field on /api/broker/order: an engine
       // older than this UI (frozen desktop sidecar) would drop the field and
       // fill a "Buy Limit" click at market. Here an old engine 404s instead.
-      const r = await fetch("/api/broker/order/pending", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ broker: tpb.broker, symbol: spec.symbol,
-                               side, qty, type: otype, price }),
-      });
+      let r;
+      const answered = tpxSending("pending", body, { side: body.side, symbol: body.symbol });
+      try {
+        r = await fetch("/api/broker/order/pending", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      } catch (e) {
+        answered();
+        hold({ detail: String(e.message || e) }, true);
+        return;
+      }
+      answered();
       // An engine older than this UI has no such route. That answers 404 or
       // 405, not only 404: an unrouted POST falls through to the engine's
       // static-file mount, and Starlette's StaticFiles refuses non-GET
@@ -15116,9 +18993,23 @@ async function tpxPlacePending(side, otype, price, qtyOverride) {
         throw new Error("engine update needed for pending orders");
       }
       const res = await readResult(r);
+      const settled = r.ok || (r.status === 400 && !res.retryable);
+      if (!settled && res.unknown) {
+        hold(res, false);
+        return;
+      }
+      // asked again on another account than its own: Switch back (tpxOtherAccount)
+      if (again && tpxOtherAccount(again, r.status, res)) return;
+      if (!settled && again) {
+        tpxSay(tpbPlainReason(String(res.detail || r.status)), "err");
+        return;
+      }
+      tpxHeldDone(body.client_id);
       if (!r.ok) throw new Error(res.detail || r.status);
       status = res.status; reason = res.reason;
+      placedOn = body.symbol;
     } else {
+      tpxSetMsg("placing…");
       const body = { account_id: tpx.acct.id, symbol: state.symbol,
                      side, otype, qty };
       if (otype === "limit") body.limit_price = price;
@@ -15131,21 +19022,25 @@ async function tpxPlacePending(side, otype, price, qtyOverride) {
       if (!r.ok) throw new Error(res.detail || r.status);
       status = res.status; reason = res.reason;
     }
+    // The broker's reason, as the order at market's, is shown whole.
     if (status === "rejected") {
-      tpxSetMsg(tpbPlainReason(reason || "rejected").slice(0, 80), "err");
+      tpxSay(tpbPlainReason(reason || "rejected"), "err");
     } else if (status === "filled") {
       // a marketable level fills straight away; say what actually happened
-      tpxSetMsg(`${side} ${otype} filled`, "ok");
+      tpxSay(`${again ? "Asked again: " : ""}${side} ${otype} ${qty} ${placedOn} filled`, "ok");
     } else {
       // sim says "working", a broker says "resting"/"accepted": all mean
       // the order is on the book at the asked level
-      tpxSetMsg(`${side} ${otype} ${qty} @ ${fmt(price)} placed`, "ok");
+      // The message prints the level; the order above SENT `price` untouched.
+      tpxSay(`${again ? "Asked again: " : ""}${side} ${otype} ${qty} ${placedOn} @ ${acdPxLine(placedOn, price)} placed`, "ok");
       acdShowOrdersTab();
     }
   } catch (e) {
-    tpxSetMsg(tpbPlainReason(String(e.message || e)).slice(0, 80), "err");
+    tpxSay(tpbPlainReason(String(e.message || e)), "err");
+  } finally {
+    tpxPlacing(false);
+    tpxRefreshAccount(); tpxRefreshPositions(); tpxRefreshOrders();
   }
-  tpxRefreshAccount(); tpxRefreshPositions(); tpxRefreshOrders();
 }
 
 function tpxVisible() {
@@ -15156,6 +19051,9 @@ function tpxSetMsg(text, cls) {
   const m = $("tpx-msg");
   m.textContent = text || "";
   m.className = cls || "";
+  m.title = "";
+  // a line of its own ("placing…"), not one tpxSay said: tpxResay leaves it
+  tpx.lineSaid = false;
 }
 
 /* The ticket's logo tile next to the symbol (previously the logo
@@ -15197,7 +19095,7 @@ function tpxUpdateQuote() {
   // the ticket names what it trades: pair + display name, same source as
   // the sidebar and the title bar
   $("tpx-sym").textContent = state.symbol || "–";
-  const tpInst = state.instruments.find((i) => i.symbol === state.symbol);
+  const tpInst = catalogInstrument(state.symbol);
   $("tpx-name").textContent = tpInst && tpInst.name ? tpInst.name : "";
   tpxSetLogo(state.symbol, tpInst && tpInst.name);
   const q = state.quotes[state.symbol];
@@ -15256,35 +19154,731 @@ async function tpxRefreshPositions() {
 // Server Error"), which r.json() would throw on, surfacing the parser's own
 // "Unexpected token 'I'..." message to the trader instead of something useful.
 // Read the body once as text and parse only if it is JSON; otherwise carry the
-// text (or the status) as a detail the caller can show.
+// text (or the status) as a detail the caller can show: whole, on one line.
 async function readResult(r) {
   const t = await r.text();
   try { return t ? JSON.parse(t) : {}; }
-  catch (e) { return { detail: (t || ("HTTP " + r.status)).slice(0, 120) }; }
+  catch (e) { return { detail: (t.replace(/\s+/g, " ").trim() || ("HTTP " + r.status)) }; }
 }
 
-async function tpxOrder(side) {
-  if (tpbViaConnector()) return tpbOrder(side);
-  if (!tpx.acct) { tpxSetMsg("no sim account", "err"); return; }
-  const qty = parseFloat($("tpx-qty").value);
-  if (!(qty > 0)) { tpxSetMsg("qty must be > 0", "err"); return; }
-  const body = { account_id: tpx.acct.id, symbol: state.symbol, side, otype: "market", qty };
-  const sl = parseFloat($("tpx-sl").value), tp = parseFloat($("tpx-tp").value);
-  if (sl > 0) body.sl_price = sl;
-  if (tp > 0) body.tp_price = tp;
-  tpxSetMsg("placing…");
+async function tpxOrder(side, again, fresh) {
+  // One order at a time from the ticket: Buy and Sell are held from the
+  // press until its answer is in, so a second press while one is out (or
+  // the chart's menu meanwhile) is not a second order.
+  if (tpx.placing) return;
+  tpxPlacing(true);
   try {
-    const r = await fetch("/api/sim/orders", {
-      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    if (tpbViaConnector()) return await tpbOrder(side, again, fresh);
+    if (!tpx.acct) { tpxSetMsg("no sim account", "err"); return; }
+    const qty = parseFloat($("tpx-qty").value);
+    if (!(qty > 0)) { tpxSetMsg("qty must be > 0", "err"); return; }
+    const body = { account_id: tpx.acct.id, symbol: state.symbol, side, otype: "market", qty };
+    const sl = parseFloat($("tpx-sl").value), tp = parseFloat($("tpx-tp").value);
+    if (sl > 0) body.sl_price = sl;
+    if (tp > 0) body.tp_price = tp;
+    tpxSetMsg("placing…");
+    try {
+      const r = await fetch("/api/sim/orders", {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      const res = await readResult(r);
+      if (!r.ok) throw new Error(res.detail || r.status);
+      tpxSetMsg(res.status === "filled" ? `${side} ${qty} ${state.symbol} filled` : `${res.status}${res.reason ? ": " + res.reason : ""}`,
+                res.status === "filled" ? "ok" : "err");
+      tpxRefreshAccount(); tpxRefreshPositions();
+    } catch (e) {
+      // the demo account's reason whole, as a broker's is
+      tpxSetMsg(String(e.message || e), "err");
+    }
+  } finally {
+    tpxPlacing(false);
+  }
+}
+
+function tpxPlacing(on) {
+  tpx.placing = !!on;
+  for (const id of ["tpx-buy", "tpx-sell", "tpx-again", "tpx-new", "tpx-show", "tpx-conn", "tpx-back"]) {
+    const b = $(id);
+    if (b) b.disabled = !!on;
+  }
+}
+
+/* One press, one order. A double-click is two click events, the second with
+   ev.detail 2: only the first one acts. A key press has detail 0. */
+function tpxOnePress(ev) {
+  return !(ev && ev.detail > 1);
+}
+
+/* ── an answer that was lost (SPEC 2) ────────────────────────────────────
+   A broker can take an order, a close or a cancel and never answer it. The
+   engine then says its outcome is not known (`unknown`), with the client_id
+   it went under. Asked again under that client_id, the broker's own record
+   answers and nothing is carried out twice; a new client_id is a new order.
+   So each request the ticket and the dock send carries a client_id made
+   here, and one whose outcome is not known is held: the ticket says so in
+   full, keeps what was sent, and offers to ask again with it, and pressing
+   the same order again asks again too. Nothing is sent again by itself:
+   asking again is the user's own press. */
+function tpxNewClientId(kind) {
+  let hex = "";
+  try {
+    const b = new Uint8Array(6);
+    crypto.getRandomValues(b);
+    hex = Array.from(b, (x) => x.toString(16).padStart(2, "0")).join("");
+  } catch (e) {
+    hex = (Math.random().toString(16).slice(2) + "000000000000").slice(0, 12);
+  }
+  return "lset-" + (kind ? kind + "-" : "") + hex;
+}
+
+function tpxSameOrder(a, b) {
+  return ["broker", "symbol", "side", "qty", "sl", "tp", "type", "price"]
+    .every((k) => (a[k] == null ? null : a[k]) === (b[k] == null ? null : b[k]));
+}
+
+// Whether two requests of one kind are the same request, its client_id
+// aside: an order (at market or resting) by everything it asks for, a close
+// by its position and its size (none for the whole), a cancel by its order.
+function tpxSameRequest(kind, a, b) {
+  const v = (x) => (x == null ? null : String(x));
+  if (kind === "close") {
+    return a.broker === b.broker && v(a.position_id) === v(b.position_id)
+      && (a.qty == null ? null : a.qty) === (b.qty == null ? null : b.qty);
+  }
+  if (kind === "cancel") return a.broker === b.broker && v(a.order_id) === v(b.order_id);
+  return tpxSameOrder(a, b);
+}
+
+// The held requests a new one could repeat or overlap: every request held
+// on that connection for the same instrument, whatever its kind (an order, a
+// close and a cancel of one instrument all change one position). A request
+// that names no instrument, as one closing everything on the connection
+// would, overlaps every one held on it; so does a held request whose
+// instrument is not known: the careful answer.
+function tpxHeldOverlap(kind, body, symbol) {
+  const want = symbol != null ? String(symbol) : (body.symbol != null ? String(body.symbol) : null);
+  return tpxHeldFor(body.broker).filter((h) => {
+    const at = tpxHeldSymbol(h);
+    return at == null || want == null || at === want;
+  });
+}
+
+// The instrument a held request is about: kept with it when it was sent;
+// for one restored from the engine's record, an order's own, else its
+// position's or its resting order's as the dock lists them, else a position
+// whose id is an instrument of the broker's catalog. null when not known.
+function tpxHeldSymbol(h) {
+  if (h.symbol != null) return String(h.symbol);
+  const b = h.body || {};
+  if (b.symbol != null) return String(b.symbol);
+  if (h.kind === "close") {
+    const p = (tpx.positions || []).find((x) => String(x.position_id || x.id) === String(b.position_id));
+    if (p && p.symbol != null) return String(p.symbol);
+    if ((tpb.catalog || []).some((s) => s.symbol === String(b.position_id))) return String(b.position_id);
+  }
+  if (h.kind === "cancel") {
+    const o = (tpx.orders || []).find((x) => String(x.id) === String(b.order_id));
+    if (o && o.symbol != null) return String(o.symbol);
+  }
+  return null;
+}
+
+// A held request in words, for the question another request is asked:
+// "The close of 1000 EUR_USD", "The order to buy 2000 EUR_USD".
+function tpxHeldName(h) {
+  const b = h.body || {};
+  if (h.kind === "order") return `The order to ${b.side} ${b.qty} ${b.symbol}`;
+  if (h.kind === "pending") {
+    return `The ${b.side} ${b.type} order for ${b.qty} ${b.symbol} at ${acdPx(b.symbol, b.price)}`;
+  }
+  if (h.kind === "close") {
+    const what = tpxHeldSymbol(h) || String(b.position_id);
+    return b.qty != null ? `The close of ${b.qty} ${what}` : `The close of ${what}`;
+  }
+  const o = h.order || acdHeldOrder(h);
+  if (!o || !o.side) {
+    // an order the dock does not list (a cancel carried out is never listed
+    // again): its instrument, when the request or the record kept it
+    const at = tpxHeldSymbol(h);
+    return `The cancel of order ${b.order_id}` + (at ? ` (${at})` : "");
+  }
+  return `The cancel of the ${o.side} ${o.otype} ${o.symbol} order`
+    + (o.price == null ? "" : ` at ${acdPx(o.symbol, o.price)}`);
+}
+
+/* Before an order, a close or a cancel is sent. The same request held is
+   asked again: what was sent, under its client_id, so it is carried out
+   once. Any other request on the instrument of a held one goes only on a
+   yes, under a client_id of its own, and a "no" says the held one again;
+   `yes` names what is about to be sent ("Place it", "Close it"). A request
+   still out from before this page was loaded (held as waiting) is never
+   asked again from here: the same request pressed again is asked about as
+   any other is. The question names the latest held request. Returns
+   {body, again} to send, or null when nothing is to be sent. */
+async function tpxHeldGate(kind, body, idKind, yes, symbol) {
+  const held = tpxHeldOverlap(kind, body, symbol);
+  const same = held.find((h) => !h.waiting && h.kind === kind && tpxSameRequest(kind, h.body, body));
+  if (same) return { body: { ...same.body }, again: same };
+  if (held.length) {
+    const h = held[held.length - 1];
+    const ok = await askConfirm(`${tpxHeldName(h)} may have been carried out. Send this as well?`, yes, "Not now");
+    if (!ok) { tpxShowHeld(h); return null; }
+  }
+  return { body: { ...body, client_id: tpxNewClientId(idKind) }, again: null };
+}
+
+/* The ticket's line after an answer or a check. While a request of this
+   broker is still held, the line goes on saying so after it: an answer that
+   covered the warning is what made pressing again look safe. The answer
+   keeps its own style (a fill reads as done), the warning after it is in
+   the error style, and the broker's words about the held request stay the
+   line's tooltip. With nothing held on the ticket's broker, a request held
+   or out on another connected broker is said the same way, named by its
+   broker, with Show (tpxHeldElse). */
+function tpxSay(text, cls) {
+  const held = tpxHeldFor(tpb.broker);
+  const h = held.length ? held[held.length - 1] : tpxHeldElse();
+  const said = String(text || "").trim();
+  tpx.lineAnswer = said ? [String(text), cls || ""] : null;
+  if (!h) {
+    tpxSetMsg(text, cls);
+    tpx.lineSaid = true;
+    tpx.lineHeld = "";
+    tpxRenderAgain();
+    return;
+  }
+  if (!said) { tpxShowHeld(h); return; }
+  const m = $("tpx-msg");
+  tpxSetMsg("", "");
+  const answer = document.createElement("span");
+  answer.className = cls || "";
+  answer.textContent = /[.!?…]$/.test(said) ? said : said + ".";
+  const warning = document.createElement("span");
+  warning.className = "err";
+  warning.textContent = tpxHeldLine(h);
+  m.append(answer, " ", warning);
+  if (h.words) m.title = String(h.words);
+  tpx.lineSaid = true;
+  tpx.lineHeld = tpxHeldKey(h);
+  tpxRenderAgain();
+}
+
+// What may have happened, in a sentence, whole. A request still out (held as
+// waiting) is waiting for its broker's answer: one sent before this page was
+// loaded says so, one of this page's own does not.
+function tpxHeldText(h) {
+  const row = (brokerPicker.rows || []).find((b) => b.broker === h.broker);
+  const name = brokerDisplayName(row || { broker: h.broker });
+  if (h.waiting) {
+    return `${tpxHeldName(h)}${h.mine ? "" : " sent before this page was loaded"} is waiting for ${name}'s answer.`;
+  }
+  // The engine stopped before the broker's answer came (the record's
+  // engine_stopped): said in the record's own words, which say so, not as
+  // an answer that was lost.
+  if (h.code === "engine_stopped" && String(h.words || "").trim()) return tpbPlainReason(String(h.words).trim());
+  const who = h.engine ? "the terminal's engine" : name;
+  const say = {
+    order: ["The order may have been placed", "Positions", "placing it again"],
+    pending: ["The order may have been placed", "Orders", "placing it again"],
+    close: ["The close may have been carried out", "Positions", "closing it again"],
+    cancel: ["The cancel may have been carried out", "Orders", "cancelling it again"],
+  }[h.kind];
+  return `${say[0]}: the answer from ${who} was lost. Check ${say[1]} before ${say[2]}.`;
+}
+
+// The held sentence as the ticket's line says it: a request of another broker
+// than the ticket's is named by that broker ("<its name>: The close may have ...").
+function tpxHeldLine(h) {
+  if (h.broker === tpb.broker) return tpxHeldText(h);
+  const row = (brokerPicker.rows || []).find((b) => b.broker === h.broker);
+  return `${brokerDisplayName(row || { broker: h.broker })}: ${tpxHeldText(h)}`;
+}
+
+// Which held request a line names, to tell when that has changed (tpxLoadHeld).
+function tpxHeldKey(h) {
+  return h ? `${h.broker}\n${h.body.client_id}\n${h.waiting ? 1 : 0}` : "";
+}
+
+function tpxHeldFor(broker) {
+  return (tpx.held || []).filter((h) => h.broker === broker);
+}
+
+function tpxHold(h) {
+  if (!h.since) h.since = tpxNow();
+  tpx.held = (tpx.held || []).filter((x) => x.body.client_id !== h.body.client_id);
+  tpx.held.push(h);
+  // a request of another broker than the ticket's (the ticket moved on while
+  // it was out) is said as another broker's is
+  if (h.broker === tpb.broker) tpxShowHeld(h);
+  else tpxSay("", "");
+}
+
+function tpxShowHeld(h) {
+  tpxSetMsg(tpxHeldLine(h), "err");
+  // the broker's own words, whole, where the window keeps them
+  const m = $("tpx-msg");
+  if (m && h.words) m.title = String(h.words);
+  tpx.lineSaid = true;
+  tpx.lineAnswer = null;
+  tpx.lineHeld = tpxHeldKey(h);
+  tpxRenderAgain();
+}
+
+// Its outcome is known now: whatever it was, it is no longer held.
+function tpxHeldDone(clientId) {
+  tpx.held = (tpx.held || []).filter((x) => x.body.client_id !== clientId);
+  if (tpx.otherAccount && tpx.otherAccount.client_id === clientId) tpx.otherAccount = null;
+  tpxRenderAgain();
+}
+
+function tpxRenderAgain() {
+  const b = $("tpx-again");
+  if (!b) return;
+  const all = tpxHeldFor(tpb.broker);
+  // Ask again is for a request whose answer was lost; one still out
+  // (waiting) has no answer to ask about yet
+  const mine = all.filter((h) => !h.waiting);
+  if (mine.length) b.classList.remove("hidden");
+  else b.classList.add("hidden");
+  // "Place as new" beside it, for the order Ask again asks about, once
+  // asking again was answered that its fate is still not known.
+  const n = $("tpx-new");
+  if (n) {
+    const h = mine[mine.length - 1];
+    if (h && h.stillUnknown && (h.kind === "order" || h.kind === "pending")) n.classList.remove("hidden");
+    else n.classList.add("hidden");
+  }
+  // While the line names a request of another broker (tpxSay): "Show" when
+  // that broker is connected, "Connect" when it is not (tpxConnectHeld)
+  const other = all.length ? null : tpxHeldElse();
+  const on = !!other && tpxConnected(other.broker);
+  const s = $("tpx-show");
+  if (s) {
+    if (other && on) s.classList.remove("hidden");
+    else s.classList.add("hidden");
+  }
+  const c = $("tpx-conn");
+  if (c) {
+    if (other && !on) c.classList.remove("hidden");
+    else c.classList.add("hidden");
+  }
+  // "Switch back", while Ask again of a request still held here was refused
+  // because the profile is on another account than its own (tpxOtherAccount)
+  const back = $("tpx-back");
+  if (back) {
+    const o = tpx.otherAccount;
+    const want = !!o && !!o.account && o.broker === tpb.broker && mine.some((h) => h.body.client_id === o.client_id);
+    if (want) back.classList.remove("hidden");
+    else back.classList.add("hidden");
+  }
+}
+
+// "Ask again": the latest held request of this broker whose answer was lost,
+// sent again as it was (one still out has no answer to ask about yet).
+async function tpxAskAgain() {
+  const mine = tpxHeldFor(tpb.broker).filter((h) => !h.waiting);
+  const h = mine[mine.length - 1];
+  if (h) await h.run(h);
+}
+
+/* "Place as new": the order Ask again asks about, which asking again found
+   still not known, placed again under a client_id of its own after a yes.
+   The broker may yet carry out the first, so the first stays held, its
+   warning on the line, until its own answer. */
+async function tpxPlaceNew() {
+  const mine = tpxHeldFor(tpb.broker).filter((h) => !h.waiting);
+  const h = mine[mine.length - 1];
+  if (!h || !h.stillUnknown || (h.kind !== "order" && h.kind !== "pending") || tpx.placing) return;
+  const row = (brokerPicker.rows || []).find((b) => b.broker === h.broker);
+  const ok = await askConfirm(`${brokerDisplayName(row || { broker: h.broker })} may still carry out the `
+    + "first order. Place a new one as well?", "Place it", "Not now");
+  if (!ok) { tpxShowHeld(h); return; }
+  const fresh = { ...h.body };
+  delete fresh.client_id;
+  if (h.kind === "order") await tpxOrder(h.side, null, fresh);
+  else await tpxPlacePending(h.side, fresh.type, fresh.price, fresh.qty, null, fresh);
+}
+
+/* ── the engine's record of this window's requests (GET /api/broker/held) ──
+   The engine writes each request this window sends on one of the four
+   routes before it hands it on ("out"), keeps one whose answer said its fate
+   is not known ("unknown"; also one still out when an engine stopped), and
+   for 120 s after an answer keeps what it was ("answered", in memory only).
+   So a page that loads, or reconnects, can say what the one before it said,
+   and hear an answer the one before it never got. For the ticket's broker:
+   - "out", and not this page's own request on its way: held as waiting. The
+     line says it is waiting for the broker's answer; there is no Ask again;
+     any other request on its instrument asks first, and so does the same
+     request pressed again (tpxHeldGate);
+   - "unknown": held exactly as if its answer had just been lost (tpxHold):
+     the warning, the record's words, Ask again;
+   - "answered", for a request held as waiting: it goes, and its answer is
+     said as this page says its own (tpxAnswered); any other is ignored;
+   - a request held that the record listed and lists no longer goes.
+   A request out or unknown on another connected broker is said on the line,
+   named, with Show (tpxHeldElse). The record is read on load, after each
+   connect or reconnect, and every 5 s with the account tick while its last
+   answer listed anything out or unknown for a connected broker or the page
+   holds anything (tpxHeldWatch). An engine without the route (404), an
+   answer that is not one and no answer at all change nothing: the page goes
+   on as before. */
+async function tpxLoadHeld(broker) {
+  if (state.hosted) return;            // no broker connections there
+  const generation = tpb.generation;
+  const read = await tpxFetchHeld();
+  if (!read) return;
+  tpxApplyHeld(read, broker, generation);
+  // the line said again when the request it should name has changed (an
+  // answer, a request gone, another broker's)
+  const held = tpxHeldFor(tpb.broker);
+  if (tpxHeldKey(held.length ? held[held.length - 1] : tpxHeldElse()) !== (tpx.lineHeld || "")) tpxResay();
+}
+
+// One read of the record: its entries (one per request, oldest first by
+// "since") and the read's number; null when there is nothing to read (an
+// older engine, a refusal, no answer, another shape), or when a read asked
+// later was taken before this one was answered.
+async function tpxFetchHeld() {
+  const seq = tpx.heldSeq = (tpx.heldSeq || 0) + 1;
+  let list;
+  try {
+    const r = await fetch("/api/broker/held");
+    if (!r.ok) return null;
+    list = (await readResult(r)).held;
+  } catch (e) { return null; }
+  if (!Array.isArray(list) || seq < (tpx.heldApplied || 0)) return null;
+  tpx.heldApplied = seq;
+  // one entry per (broker, client_id): out before unknown before answered
+  const rank = { out: 3, unknown: 2, answered: 1 };
+  const best = new Map();
+  for (const e of list) {
+    if (!e || typeof e !== "object" || Array.isArray(e) || typeof e.broker !== "string" || !e.broker
+        || typeof e.client_id !== "string" || !e.client_id) continue;
+    const r = rank[e.state == null ? "unknown" : e.state];
+    if (!r) continue;
+    const key = e.broker + "\n" + e.client_id;
+    const was = best.get(key);
+    if (!was || r > was.r) best.set(key, { e, r });
+  }
+  const since = (e) => (typeof e.since === "string" ? e.since : "");
+  tpx.record = [...best.values()].map((x) => x.e)
+    .sort((a, b) => (since(a) < since(b) ? -1 : since(a) > since(b) ? 1 : 0));
+  return { list: tpx.record, seq };
+}
+
+// What one read says to the ticket's broker (`broker` and `generation` as
+// they were when it was asked: a switch meanwhile drops it). A request this
+// page has out, or whose own answer came after the read was asked, is this
+// page's own to say: the read does not touch it.
+function tpxApplyHeld(read, broker, generation) {
+  if (tpb.broker !== broker || tpb.generation !== generation) return;
+  const { list, seq } = read;
+  const own = (cid) => !!tpx.mine && tpx.mine.has(cid) && tpx.mine.get(cid) >= seq;
+  const mine = list.filter((e) => e.broker === broker);
+  const listed = new Set(mine.map((e) => e.client_id));
+  // a request held that the record listed and lists no longer: gone
+  for (const h of tpxHeldFor(broker)) {
+    const cid = h.body.client_id;
+    if (own(cid)) continue;
+    if (listed.has(cid)) h.seen = true;
+    else if (h.seen) tpx.held = tpx.held.filter((x) => x !== h);
+  }
+  // what is held now first, the answers last: an answer's words then stay on
+  // the line, with what is still held after them (tpxSay)
+  const answers = [];
+  for (const e of mine) {
+    if (own(e.client_id)) continue;
+    const st = e.state == null ? "unknown" : e.state;
+    const h = tpxHeldFor(broker).find((x) => x.body.client_id === e.client_id);
+    if (st === "answered") {
+      if (h && h.waiting) answers.push([h, e]);
+      continue;
+    }
+    if (h && (st === "out") === !!h.waiting) continue;      // held as it is
+    const got = tpxRestoreHeld(e, broker);
+    if (!got) continue;
+    got.seen = true;
+    if (st === "out") { got.waiting = true; got.mine = !!tpx.mine && tpx.mine.has(e.client_id); }
+    tpxHold(got);
+  }
+  for (const [h, e] of answers) tpxAnswered(h, e);
+  tpxRenderAgain();
+}
+
+// A request held as waiting, answered (the record's "answered"): no longer
+// held, and its answer said as this page says its own: the answer's words
+// when it has any (without a code word in front), else what was carried out
+// in the page's own words ("closed 1000 of EUR_USD"), and a refusal without
+// words by its status; in the ok style when it was carried out, the error
+// style when it was not. Then the account is read again.
+function tpxAnswered(h, e) {
+  tpxHeldDone(h.body.client_id);
+  const words = e.detail == null ? "" : tpbPlainReason(String(e.detail).replace(/\s+/g, " ").trim());
+  const ok = typeof e.ok === "boolean" ? e.ok : Number(e.status) >= 200 && Number(e.status) < 300;
+  if (ok) tpxSay(words || tpxAnsweredText(h), "ok");
+  else tpxSay(words || String(e.status == null ? "" : e.status), "err");
+  tpxRefreshAccount(); tpxRefreshPositions();
+  if (h.kind === "pending" || h.kind === "cancel") tpxRefreshOrders();
+}
+
+// A request carried out, in this page's own words for it: as it says a
+// request restored from the record and asked again (acdCloseFull,
+// acdCancelOrder, tpxPlacePending), and an order at market by what it asked.
+function tpxAnsweredText(h) {
+  const b = h.body || {};
+  if (h.kind === "order") return `${b.side} ${b.qty} ${b.symbol} placed`;
+  if (h.kind === "pending") return `${b.side} ${b.type} ${b.qty} @ ${acdPxLine(b.symbol, b.price)} placed`;
+  if (h.kind === "close") {
+    const what = tpxHeldSymbol(h) || String(b.position_id);
+    return b.qty != null ? `closed ${b.qty} of ${what}` : `closed ${what}`;
+  }
+  const o = h.order || acdHeldOrder(h);
+  return o && o.side ? `${o.side} ${o.otype} @ ${o.price == null ? "" : acdPx(o.symbol, o.price)} cancelled`
+    : `order ${b.order_id} cancelled`;
+}
+
+// The ticket's line said again as it stands, when what it names has changed:
+// its answer (what tpxSay said last), then whatever is held now. A line of
+// the ticket's own making ("placing…", "connecting…") is left as it is.
+function tpxResay() {
+  const m = $("tpx-msg");
+  if (!m || (!tpx.lineSaid && m.textContent)) return;
+  const a = tpx.lineAnswer;
+  tpxSay(a ? a[0] : "", a ? a[1] : "");
+}
+
+// Every request held, or out, on the brokers `want` accepts, oldest first
+// ("since"): the page's holds; the record's entries out or unknown that the
+// page neither holds nor says itself (its own requests on their way, or
+// answered after the record's last read was asked); and, with `inFlight`,
+// this page's own requests on their way.
+function tpxHeldItems(want, inFlight) {
+  const items = (tpx.held || []).filter((h) => want(h.broker));
+  const have = new Set(items.map((h) => h.broker + "\n" + h.body.client_id));
+  const seq = tpx.heldApplied || 0;
+  for (const e of tpx.record || []) {
+    const st = e.state == null ? "unknown" : e.state;
+    if ((st !== "out" && st !== "unknown") || !want(e.broker)) continue;
+    const key = e.broker + "\n" + e.client_id;
+    if (have.has(key) || (!!tpx.mine && tpx.mine.has(e.client_id) && tpx.mine.get(e.client_id) >= seq)) continue;
+    const h = tpxRestoreHeld(e, e.broker);
+    if (!h) continue;
+    if (st === "out") { h.waiting = true; h.mine = !!tpx.mine && tpx.mine.has(e.client_id); }
+    have.add(key);
+    items.push(h);
+  }
+  if (inFlight) {
+    for (const s of (tpx.sending || new Map()).values()) {
+      if (want(s.broker)) items.push({ ...s, waiting: true, mine: true });
+    }
+  }
+  const since = (h) => String(h.since || "");
+  return items.map((h, i) => [h, i])
+    .sort((x, y) => (since(x[0]) < since(y[0]) ? -1 : since(x[0]) > since(y[0]) ? 1 : x[1] - y[1]))
+    .map((x) => x[0]);
+}
+
+// The request the ticket's line names when nothing is held on its broker:
+// the latest held or out on another broker, connected or not, or null. One
+// of a connected broker is offered Show; one of a broker that is not
+// connected (after an engine restart nothing is) is offered Connect
+// (tpxRenderAgain).
+function tpxHeldElse() {
+  const items = tpxHeldItems((b) => b !== tpb.broker, false);
+  return items.length ? items[items.length - 1] : null;
+}
+
+function tpxConnected(broker) {
+  return (brokerPicker.rows || []).some((b) => b.broker === broker && b.connected);
+}
+
+// Whether the 5 s account tick reads the record again: while its last answer
+// listed anything out or unknown for a connected broker, or the page holds
+// anything.
+function tpxHeldWatch() {
+  if ((tpx.held || []).length) return true;
+  return (tpx.record || []).some((e) => (e.state == null || e.state === "out" || e.state === "unknown")
+                                        && tpxConnected(e.broker));
+}
+
+// A request of this page's on its way (acdSend, tpxPlacePending, tpbOrder):
+// the record's "out" for it is this page's own, said by its own answer, not
+// held as waiting. What it returns is called when its answer (or no answer
+// at all) is in; a read asked after that is the record's to say.
+function tpxSending(kind, body, about) {
+  const cid = body && body.client_id;
+  if (!cid) return () => {};
+  if (!tpx.sending) tpx.sending = new Map();
+  if (!tpx.mine) tpx.mine = new Map();
+  tpx.sending.set(cid, { kind, broker: body.broker, body: { ...body }, ...(about || {}), since: tpxNow() });
+  tpx.mine.set(cid, Infinity);
+  return () => {
+    tpx.sending.delete(cid);
+    tpx.mine.set(cid, tpx.heldSeq || 0);
+  };
+}
+
+// Now, as the record writes it: ISO-8601 UTC to the second.
+function tpxNow() {
+  return new Date().toISOString().replace(/\.\d+Z$/, "Z");
+}
+
+// "Show": the ticket pointed at the broker whose held request the line names
+// (tpxHeldElse); that broker's connect then holds it as usual (tpbSwitch).
+async function tpxShowBroker() {
+  const h = tpxHeldFor(tpb.broker).length ? null : tpxHeldElse();
+  // a broker that is not connected is connected by Connect, which asks what
+  // its card asks first (tpxConnectHeld), never by pointing the ticket at it
+  if (!h || !tpxConnected(h.broker)) return;
+  const sel = $("tpx-broker");
+  if (sel) sel.value = h.broker;
+  await tpbSwitch(h.broker);
+}
+
+/* Ask again refused by the engine because the broker's profile is now bound
+   to another account than the one the request went out on (409
+   held_other_account; the record keeps each request's account): the
+   engine's words, which name both accounts, in the error style, the request
+   still held after them, and "Switch back" (tpxSwitchBack). True when that
+   was the answer. */
+function tpxOtherAccount(h, status, res) {
+  const detail = res && res.detail;
+  const code = (res && res.code) || (detail && typeof detail === "object" ? detail.code : null);
+  if (status !== 409 || code !== "held_other_account" || !h) return false;
+  const rec = (tpx.record || []).find((e) => e && e.broker === h.broker && e.client_id === h.body.client_id);
+  const account = h.account || (rec && typeof rec.account === "string" && rec.account ? rec.account : null)
+    || (res && typeof res.account === "string" && res.account ? res.account : null);
+  tpx.otherAccount = { broker: h.broker, client_id: h.body.client_id, account };
+  const words = oneLine(typeof detail === "string" ? detail : (detail && detail.detail) || "");
+  tpxSay(tpbPlainReason(words || "This request went out on another account of this broker."), "err");
+  return true;
+}
+
+/* "Switch back": the broker's profile put back on the account the held
+   request went out on, with confirm (the user has just chosen it), and the
+   ticket on it; its connect holds the request again, and Ask again then
+   works as usual. */
+async function tpxSwitchBack() {
+  const o = tpx.otherAccount;
+  if (!o || !o.account || o.broker !== tpb.broker || tpx.placing) return;
+  tpxPlacing(true);
+  try {
+    const r = await fetch("/api/broker/account", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ broker: o.broker, account_id: o.account, confirm: true }),
     });
     const res = await readResult(r);
-    if (!r.ok) throw new Error(res.detail || r.status);
-    tpxSetMsg(res.status === "filled" ? `${side} ${qty} filled` : `${res.status}${res.reason ? ": " + res.reason : ""}`,
-              res.status === "filled" ? "ok" : "err");
-    tpxRefreshAccount(); tpxRefreshPositions();
+    if (!r.ok) {
+      tpxSay(tpbPlainReason(oneLine(typeof res.detail === "string" ? res.detail : r.status)), "err");
+      return;
+    }
+    tpx.otherAccount = null;
+    if (res.connected) {
+      const sel = $("tpx-broker");
+      if (sel) sel.value = o.broker;
+      await tpbSwitch(o.broker);
+    } else {
+      tpxSay("", "");
+    }
   } catch (e) {
-    tpxSetMsg(String(e.message || e).slice(0, 80), "err");
+    tpxSay(tpbPlainReason(String((e && e.message) || e)), "err");
+  } finally {
+    tpxPlacing(false);
+    tpxRenderAgain();
+    const screen = $("conn-screen");
+    if (screen && !screen.classList.contains("hidden") && typeof refreshConnScreen === "function") refreshConnScreen();
   }
+}
+
+/* "Connect": the broker whose held request the line names is not connected
+   (tpxHeldElse; after an engine restart nothing is). It is connected as its
+   card's Connect does, through csConnect and pickBroker: the live-money
+   question where its card asks it, the ticket put on it, and its connect
+   holds the request again with Ask again (tpbSwitch and
+   tpxLoadHeld). Its saved keys are used; a box with no saved value cannot be
+   typed here, so its card is opened instead and nothing is sent. A refusal
+   is said on the line in the broker's words (tpbSwitch) and on its card. */
+async function tpxConnectHeld() {
+  const h = tpxHeldFor(tpb.broker).length ? null : tpxHeldElse();
+  if (!h || tpxConnected(h.broker)) return;
+  const hub = (brokerPicker.rows || []).find((b) => b.broker === h.broker);
+  const fields = (hub && Array.isArray(hub.credential_form) ? hub.credential_form : [])
+    .filter((f) => f && f.key && f.type !== "none");
+  const stored = hub && Array.isArray(hub.stored_credentials) ? new Set(hub.stored_credentials) : null;
+  if (!hub || (stored && fields.some((f) => !stored.has(f.key)))) {
+    connScreen.broker = h.broker;
+    connScreen.brokerPinned = true;
+    openConnScreen();
+    return;
+  }
+  tpxPlacing(true);
+  try {
+    const out = await csConnect(h.broker, hub, {}, stored);
+    if (out && out.ok === false) {
+      connScreen.errors[h.broker] = { message: String(out.error || "the broker did not connect") };
+    } else {
+      delete connScreen.errors[h.broker];
+      // with no LSE key, MARKETS follows to that broker's own source when
+      // the boot put it on another for this (marketsBootSource)
+      if (typeof marketsBootSource === "function") marketsBootSource();
+    }
+  } catch (e) {
+    connScreen.errors[h.broker] = { message: String((e && e.message) || e) };
+    tpxSay(tpbPlainReason(String((e && e.message) || e)), "err");
+  } finally {
+    tpxPlacing(false);
+  }
+}
+
+/* Before a Disconnect, an Unlink or a Forget of a broker with anything out or
+   held on it: "<the held sentence> Disconnect anyway?" ("Unlink anyway?",
+   "Forget anyway?"), the sentence of its latest request, with "<verb>" and
+   "Not now". The record is read first, so what is asked about is current.
+   True when nothing is out or held there, or on a yes. */
+async function tpxHeldAsk(broker, verb, yes) {
+  const items = await tpxHeldOn(broker);
+  if (!items.length) return true;
+  return askConfirm(`${tpxHeldText(items[items.length - 1])} ${verb} anyway?`, yes || verb, "Not now");
+}
+
+// Everything out or held on one broker, oldest first, the record read first
+// so what is asked about is current; this page's own requests on their way
+// count. [] on the hosted terminal, which holds no broker connection.
+async function tpxHeldOn(broker) {
+  if (state.hosted) return [];
+  await tpxLoadHeld(tpb.broker);
+  return tpxHeldItems((b) => b === broker, true);
+}
+
+// One entry of the engine's record as the page holds a request whose answer
+// was just lost; null when it is not a request of this connection's.
+function tpxRestoreHeld(e, broker) {
+  const routes = { "/api/broker/order": ["order", "order"], "/api/broker/order/pending": ["pending", "resting"],
+                   "/api/broker/order/cancel": ["cancel", "cancel"], "/api/broker/close": ["close", "close"] };
+  const k = e && typeof e === "object" ? routes[e.route] : null;
+  const req = k ? e.request : null;
+  if (!k || e.what !== k[1] || !req || typeof req !== "object" || Array.isArray(req)
+      || e.broker !== broker || req.broker !== broker
+      || typeof req.client_id !== "string" || !req.client_id) return null;
+  const kind = k[0];
+  const run = {
+    order: (h) => tpxOrder(h.side, h),
+    pending: (h) => tpxPlacePending(h.side, h.body.type, h.body.price, h.body.qty, h),
+    close: (h) => acdCloseFull(acdHeldPosition(h), h),
+    cancel: (h) => acdCancelOrder(acdHeldOrder(h), h),
+  }[kind];
+  // its instrument: the one the engine kept with it, else what was sent
+  const at = typeof e.instrument === "string" && e.instrument ? e.instrument
+    : (req.symbol == null ? undefined : String(req.symbol));
+  return { kind, broker, body: { ...req }, side: req.side, symbol: at,
+           engine: false, words: e.detail == null ? "" : String(e.detail), run,
+           since: typeof e.since === "string" ? e.since : "",
+           // the record's code ("engine_stopped": the engine stopped before
+           // the answer came, said in the record's own words, tpxHeldText),
+           // and the account the profile was bound to when it went out (an
+           // Ask again on another account is refused, tpxSwitchBack)
+           code: typeof e.code === "string" ? e.code : null,
+           account: typeof e.account === "string" && e.account ? e.account : null };
 }
 
 // ── The trade ticket, through brue-connect ─────────────────────────────────
@@ -15305,7 +19899,7 @@ async function tpxOrder(side) {
 // from one account over a table from another (the reported "frozen
 // balance" bug).
 const tpb = { broker: "lse-hosted", catalog: [], quotes: {}, timer: null,
-              ticks: 0, adopting: false };
+              ticks: 0, adopting: false, generation: 0, quoteError: "", quoteLine: "" };
 
 function tpbViaConnector() { return tpb.broker !== "lse-hosted"; }
 
@@ -15339,6 +19933,40 @@ function tpbSpec() {
   return tpb.catalog.find((s) => s.symbol === sym) || null;
 }
 
+// The decimals the ticket's BROKER declares for one of its instruments, or
+// null: the practice account, or a symbol its catalog does not hold. The
+// lookup is rebuilt when the catalog is replaced (a venue holds thousands of
+// rows and the dock repaints every second).
+function tpbDigits(symbol) {
+  if (!tpbViaConnector()) return null;
+  if (tpb.digitsOf !== tpb.catalog) {
+    tpb.digitsMap = new Map((tpb.catalog || []).map((s) => [s.symbol, s.digits]));
+    tpb.digitsOf = tpb.catalog;
+  }
+  const d = tpb.digitsMap.get(symbol);
+  return Number.isInteger(d) && d >= 0 && d <= 20 ? d : null;
+}
+// A price in the dock, in History and in the ticket's messages: from the
+// broker's digits (fmtPx) when the ticket trades through a connector and the
+// catalog declares them, by magnitude (fmt) otherwise, at the places the
+// instrument's current quote's size gives (quoteScale), so Avg and Price of
+// one position read alike. fmt alone printed a 73154.662 fill as "73154.7"
+// beside a message that said 73154.662.
+function acdPx(symbol, p) {
+  const d = tpbDigits(symbol);
+  const by = quoteScale(dockQuote(symbol));
+  return d == null ? fmt(p, by) : fmtPx(p, d, by);
+}
+// A price in a line that says an order was placed or filled: every place the
+// broker declares for the instrument (toFixed(digits)), with no cut by size,
+// so the line reads the level as it was sent or filled; an instrument that
+// declares none is printed as the dock prints it (acdPx).
+function acdPxLine(symbol, p) {
+  const d = tpbDigits(symbol);
+  const n = Number(p);
+  return d == null || p == null || p === "" || !isFinite(n) ? acdPx(symbol, p) : n.toFixed(d);
+}
+
 async function tpbSetup() {
   const sel = $("tpx-broker");
   sel.innerHTML = "";
@@ -15350,6 +19978,8 @@ async function tpbSetup() {
   // so the dock's first paint is the ticket's actual account rather than
   // whichever path answered first (see the tpb declaration).
   tpb.adopting = true;
+  let switched = false, first = null;
+  const firstGeneration = tpb.generation;
   try {
     // The hosted relay is offered ONLY where it is the only option. In the
     // downloaded app the same account is reached as a broker, through the
@@ -15366,6 +19996,10 @@ async function tpbSetup() {
     } catch (e) { /* hub unavailable: sim-only ticket */ }
     sel.onchange = () => tpbSwitch(sel.value);
     $("tpx-bsym").onchange = () => tpbInstrumentChanged();
+    // The engine's record of this window's requests (tpxLoadHeld), read
+    // before the ticket chooses its broker: a request still out, or whose
+    // answer was lost, decides where it opens.
+    if (!state.hosted) first = await tpxFetchHeld();
     // Adopt a connection the ENGINE already holds. Connections live in the
     // engine, not in this page, so a reload used to leave a broker connected
     // (and, for a live one, armed) with the ticket quietly showing LSE Demo.
@@ -15377,20 +20011,34 @@ async function tpbSetup() {
     const has = (name) => brokerPicker.rows.some((b) => b.broker === name);
     let want = tpb.broker;
     if (tpb.broker === "lse-hosted" && !state.hosted) {
+      const connected = (n) => brokerPicker.rows.some((b) => b.broker === n && b.connected);
+      // (1) a connected broker with a request out or held in the record,
+      // the oldest first: the first connected row (the built-in simulator)
+      // left a held request of another broker unseen after a reload;
+      const held = ((first && first.list) || []).find((e) => (e.state == null || e.state === "out"
+        || e.state === "unknown") && connected(e.broker));
+      // (2) else the broker the ticket was on before the reload, while it is
+      // still connected (the page works without the store);
+      let before = null;
+      try { before = localStorage.getItem("lse.ticket.broker"); } catch (e) { before = null; }
       const live = brokerPicker.rows.find((b) => b.connected);
-      // an already-open connection, else our demo account when the user has a
-      // key for it, else the built-in simulator, which needs nothing at all.
-      // `ready` comes from the engine, which knows whether a broker's
-      // prerequisites are met. Reading a UI flag here was an ordering bug: this
-      // runs before the boot fetch that sets it, so the key always looked absent.
+      // (3) else an already-open connection, else our demo account when the
+      // user has a key for it, else the built-in simulator, which needs
+      // nothing at all. `ready` comes from the engine, which knows whether a
+      // broker's prerequisites are met. Reading a UI flag here was an
+      // ordering bug: this runs before the boot fetch that sets it, so the
+      // key always looked absent.
       const ready = (n) => brokerPicker.rows.some((b) => b.broker === n && b.ready);
-      want = (live && live.broker)
+      want = (held && held.broker)
+        || (before && connected(before) ? before : null)
+        || (live && live.broker)
         || (ready("lse-sim") ? "lse-sim" : null)
         || (has("paper") ? "paper" : tpb.broker);
     }
     if (want !== tpb.broker) {
       sel.value = want;
       tpb.adopting = false; // the decision is made; tpbSwitch repaints
+      switched = true;
       await tpbSwitch(want);
     } else if ([...sel.options].some((o) => o.value === tpb.broker)) {
       sel.value = tpb.broker;
@@ -15404,9 +20052,23 @@ async function tpbSetup() {
     }
   }
   renderConnBar();
+  // Requests whose answer was lost, or is still to come, before this page
+  // loaded: the record read above, said for the ticket's broker (a switch
+  // above read it again, after its connect).
+  if (!switched && first) {
+    tpxApplyHeld(first, tpb.broker, firstGeneration);
+    tpxResay();
+  }
+  // With no LSE key, a request out or held puts MARKETS on the ticket
+  // broker's own source, so the ticket and its line are on screen.
+  marketsBootSource();
 }
 
 function tpbStop() {
+  tpb.generation++;
+  tpb.quotes = {};
+  tpb.quoteError = "";
+  tpb.quoteLine = "";
   if (tpb.timer) { clearInterval(tpb.timer); tpb.timer = null; }
 }
 
@@ -15619,24 +20281,69 @@ function tpbFollowChart(symbol) {
    survive the switch, so a JPY refusal sat under a BTC/USD ticket as if it
    were about BTC/USD. */
 function tpbInstrumentChanged() {
-  tpxSetMsg("");
+  // (A request still held is about the account, not the instrument: its
+  // warning stays, tpxSay.)
+  tpxSay("", "");
   tpbSubscribe(); tpbUpdateQuote(); tpbRefreshPositions();
 }
 
-/* Ask the broker to price what this panel is showing, and only that. The hub
-   no longer subscribes to a broker's whole catalog on connect: for a broker
-   dealing thousands of instruments that meant asking for every price on earth
-   to fill one row. */
+/* Price the ticket and every open position using the broker's exact symbols.
+   The dock marks positions from this cache too; subscribing only the chart
+   left every other held instrument blank. The connector deduplicates these
+   requests, so the positions poll can safely retry after a failed request. */
 async function tpbSubscribe() {
   if (!tpbViaConnector()) return;
-  const sym = $("tpx-bsym").value;
-  if (!sym) return;
+  const broker = tpb.broker, generation = tpb.generation;
+  const signature = () => JSON.stringify([...new Set([$("tpx-bsym").value,
+    ...(tpx.positions || []).map((p) => p.symbol)].filter(Boolean))]);
+  const active = tpb.subscribeTask;
+  if (active && active.broker === broker && active.generation === generation) {
+    if (active.signature !== signature()) active.again = true;
+    return active.promise;
+  }
+  const task = { broker, generation, signature: signature(), again: false };
+  tpb.subscribeTask = task;
+  task.promise = (async () => {
+    do {
+      task.again = false; task.signature = signature();
+      await tpbSubscribeOnce(broker, generation);
+    } while (task.again && tpb.broker === broker && tpb.generation === generation);
+  })().finally(() => { if (tpb.subscribeTask === task) tpb.subscribeTask = null; });
+  return task.promise;
+}
+
+async function tpbSubscribeOnce(broker, generation) {
+  if (!tpbViaConnector() || tpb.broker !== broker || tpb.generation !== generation) return;
+  const symbols = [...new Set([$("tpx-bsym").value,
+    ...(tpx.positions || []).map((p) => p.symbol)].filter(Boolean))];
+  if (!symbols.length) return;
+  const current = () => tpb.broker === broker && tpb.generation === generation;
+  // Said as every later line is (tpxSay): a request still held keeps its
+  // warning, and its words, after the error. The line as said is kept, so
+  // the recovery below clears only that line, not a later answer.
+  const showError = (reason) => {
+    if (!current()) return;
+    // the reason whole, on one line, in words (tpbPlainReason)
+    tpb.quoteError = "Prices unavailable: " + tpbPlainReason(String(reason).replace(/\s+/g, " ").trim());
+    tpxSay(tpb.quoteError, "err");
+    tpb.quoteLine = $("tpx-msg").textContent;
+  };
   try {
-    await fetch("/api/broker/subscribe", {
+    const r = await fetch("/api/broker/subscribe", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ broker: tpb.broker, symbols: [sym] }),
+      body: JSON.stringify({ broker, symbols }),
     });
-  } catch (e) { /* the poll will show a dash until it lands */ }
+    const result = await r.json();
+    if (!current()) return;
+    if (!r.ok) { showError(result.detail || r.status); return; }
+    if (result.refused && result.refused.length) {
+      showError(result.refused.join(", ") + " (broker subscription limit; reconnect to reset)");
+      return;
+    }
+    if (tpb.quoteError && $("tpx-msg").textContent === tpb.quoteLine) tpxSay("", "");
+    tpb.quoteError = "";
+    tpb.quoteLine = "";
+  } catch (e) { showError("connection failed; retrying"); }
 }
 
 // A broker mid-login (SPEC 1.6 interactive auth): the engine spawned the
@@ -15663,7 +20370,9 @@ async function tpbAwaitBrokerLogin(broker) {
     if (r.ok) opened = await r.json();
   } catch (e) { /* the poll below still carries the flow */ }
   if (opened && opened.url && !opened.opened) window.open(opened.url);
-  tpxSetMsg("finish the login in your browser…");
+  // (through tpxSay: the wait can be minutes, and a held request's warning
+  // stays after it)
+  tpxSay("finish the login in your browser…");
   const deadline = Date.now() + 5 * 60 * 1000;
   while (Date.now() < deadline) {
     await new Promise((res) => setTimeout(res, 2500));
@@ -15680,7 +20389,7 @@ async function tpbAwaitBrokerLogin(broker) {
       // caller repaint it. Waiting for `connected` here meant the chooser
       // was never reached: the loop span the full five minutes while the
       // question sat unasked.
-      tpxSetMsg("choose an account");
+      tpxSay("choose an account");
       return st;
     }
   }
@@ -15690,6 +20399,15 @@ async function tpbAwaitBrokerLogin(broker) {
 async function tpbSwitch(broker) {
   tpbStop();
   tpb.broker = broker;
+  // a refusal for another account was about the connection before this one
+  // (Switch back goes through here too)
+  tpx.otherAccount = null;
+  // kept for the page loaded next (tpbSetup's (2)); the hosted relay is not a
+  // broker to come back to. The page works without the store.
+  if (broker !== "lse-hosted") {
+    try { localStorage.setItem("lse.ticket.broker", broker); } catch (e) { /* no store: nothing kept */ }
+  }
+  tpxRenderAgain();   // a held request belongs to its own broker
   // The dock must never show one account's table under another account's
   // name while the switch is in flight; blank it with the reason.
   acdReset(tpbViaConnector() ? "connecting…" : "");
@@ -15697,8 +20415,12 @@ async function tpbSwitch(broker) {
   if (!tpbViaConnector()) {
     // back to the hosted sim: restore the normal panel immediately
     tpxRefreshAccount(); tpxRefreshPositions(); tpxUpdateQuote();
+    // a request still held on the broker the ticket left (a Disconnect
+    // answered "anyway") is said again, named by that broker, with Connect
+    tpxResay();
     renderConnBar();
-    return;
+    if (tpx.sync) tpx.sync();
+    return { ok: true };
   }
   tpxSetMsg("connecting…");
   try {
@@ -15709,12 +20431,16 @@ async function tpbSwitch(broker) {
     if (!r.ok) throw new Error((await r.json()).detail || r.status);
     let st0 = await r.json();
     if (st0.auth_pending) st0 = await tpbAwaitBrokerLogin(broker) || st0;
+    // What this broker's requests the engine still holds unanswered (a
+    // window reloaded since, or one before it): said again from here on.
+    await tpxLoadHeld(broker);
     if (st0.needs_account) {
       // No session until an account is picked, so there is no catalog to
-      // read and nothing to subscribe to yet.
-      tpxSetMsg("choose an account in Connections");
+      // read and nothing to subscribe to yet. (A held request's warning
+      // stays after it, tpxSay.)
+      tpxSay("choose an account in Connections");
       renderConnBar();
-      return;
+      return { ok: true, needsAccount: true };
     }
     r = await fetch(`/api/broker/catalog?broker=${encodeURIComponent(broker)}`);
     if (!r.ok) throw new Error("catalog unavailable");
@@ -15733,7 +20459,7 @@ async function tpbSwitch(broker) {
       if (bare(s.symbol) === want) o.selected = true;
       bs.appendChild(o);
     }
-    tpxSetMsg("");
+    tpxSay("", "");   // a request of this broker still held is said again
     // Connecting is what registers the venue as a data source, so the ticket
     // cannot know whether the sidebar can list its pairs until the provider
     // list is re-read. Without this the dropdown stayed visible on the first
@@ -15746,11 +20472,23 @@ async function tpbSwitch(broker) {
     // is fed by the adapter's event stream, this only reads it.
     tpb.timer = setInterval(async () => {
       if (!tpbViaConnector()) { tpbStop(); return; }
+      const quoteBroker = tpb.broker, quoteGeneration = tpb.generation;
       try {
-        const q = await fetch(`/api/broker/quotes?broker=${encodeURIComponent(tpb.broker)}`);
-        if (q.ok) { tpb.quotes = await q.json(); tpbUpdateQuote(); }
+        const q = await fetch(`/api/broker/quotes?broker=${encodeURIComponent(quoteBroker)}`);
+        if (q.ok) {
+          const quotes = await q.json();
+          if (tpb.broker !== quoteBroker || tpb.generation !== quoteGeneration) return;
+          tpb.quotes = quotes; tpbUpdateQuote();
+          if (tpx.dockTab === "pos") acdRenderPositions(tpx.positions || []);
+        }
       } catch (e) { /* transient */ }
-      if (tpb.ticks++ % 5 === 0) { tpbRefreshAccount(); tpbRefreshPositions(); }
+      if (tpb.ticks++ % 5 === 0) {
+        tpbRefreshAccount(); tpbRefreshPositions();
+        // the engine's record, while anything in it is out or held
+        // (tpxHeldWatch): an answer that comes is said, a request that
+        // goes is let go
+        if (tpxHeldWatch()) tpxLoadHeld(tpb.broker);
+      }
     }, 1000);
     tpbRefreshAccount(); tpbRefreshPositions(); tpbUpdateQuote();
     // the top-left now names this broker; refresh the list so it uses the
@@ -15760,8 +20498,15 @@ async function tpbSwitch(broker) {
       if (bl.ok) brokerPicker.rows = await bl.json();
     } catch (e2) { /* the slug is a fine fallback */ }
     renderConnBar();
+    if (tpx.sync) tpx.sync();   // a connected broker shows the ticket (see sync)
+    return { ok: true };
   } catch (e) {
-    tpxSetMsg(String(e.message || e).slice(0, 120), "err");
+    // The broker's refusal whole and in words, here as on the card that
+    // asked: the protocol's code word in front ("unauthorized: ") is
+    // dropped as the card drops it (tpbPlainReason). The caller still gets
+    // the engine's detail as it was.
+    const why = String(e.message || e);
+    tpxSay(tpbPlainReason(why), "err");
     // No silent fallback to the hosted relay. Two trading paths that swap
     // under a failure is how a bug in one hides behind the other; the user
     // sees which broker refused and picks again. Hosted terminals have only
@@ -15770,6 +20515,15 @@ async function tpbSwitch(broker) {
       $("tpx-broker").value = "lse-hosted";
       tpbSwitch("lse-hosted");
     }
+    // The reason goes back to whoever asked as well. The ticket line above
+    // sits behind the Connections screen, so a card that pressed Connect and
+    // got nothing back showed no error and a button that stayed disabled.
+    try {
+      const bl = await fetch("/api/broker/list");
+      if (bl.ok) brokerPicker.rows = await bl.json();
+    } catch (e2) { /* the caller still has the reason */ }
+    if (tpx.sync) tpx.sync();
+    return { ok: false, error: why };
   }
 }
 
@@ -15779,25 +20533,37 @@ function tpbUpdateQuote() {
   $("tpx-name").textContent = spec && spec.name ? spec.name : "";
   tpxSetLogo(spec ? spec.symbol : "", spec && spec.name);
   const q = spec ? tpb.quotes[spec.symbol] : null;
-  const d = spec && spec.digits != null ? spec.digits : 5;
   if (!q || q.bid == null) {
     $("tpx-bid").textContent = $("tpx-ask").textContent = "–";
     $("tpx-spread").textContent = "–";
     tpxRenderMargin();   // unpriced instrument: the block hides itself
     return;
   }
-  $("tpx-bid").textContent = q.bid.toFixed(d);
-  $("tpx-ask").textContent = q.ask.toFixed(d);
-  $("tpx-spread").textContent = (q.ask - q.bid).toFixed(d);
+  // Declared digits: the chart's rule (fmtPx), the three numbers at one
+  // size's places, so BUY and SELL read alike (toFixed(d) alone padded a
+  // nine-digit venue to "73100.500000000"). None declared: at most five
+  // decimals, trailing zeros trimmed down to two, as before.
+  const d = spec && Number.isInteger(spec.digits) && spec.digits >= 0 && spec.digits <= 20 ? spec.digits : null;
+  const by = Math.max(Math.abs(Number(q.bid)), Math.abs(Number(q.ask == null ? q.bid : q.ask)));
+  const px = (v) => {
+    if (d != null) return fmtPx(v, d, by);
+    const s = fmtPx(v, 5, 1);
+    return s.replace(/(\.\d\d\d*?)0+$/, "$1");
+  };
+  $("tpx-bid").textContent = px(q.bid);
+  $("tpx-ask").textContent = px(q.ask);
+  $("tpx-spread").textContent = px(q.ask - q.bid);
   // Margin moves with the price, so it is repainted on the same tick.
   tpxRenderMargin();
 }
 
 async function tpbRefreshAccount() {
+  const broker = tpb.broker, generation = tpb.generation;
   try {
-    const r = await fetch(`/api/broker/account?broker=${encodeURIComponent(tpb.broker)}`);
+    const r = await fetch(`/api/broker/account?broker=${encodeURIComponent(broker)}`);
     if (!r.ok) return;
     const a = await r.json();
+    if (tpb.broker !== broker || tpb.generation !== generation) return;
     const label = $("tpx-broker").selectedOptions[0];
     const name = a.label || (label ? label.textContent : tpb.broker);
     $("tpx-acct-name").textContent = name;
@@ -15826,10 +20592,12 @@ async function tpbRefreshAccount() {
 }
 
 async function tpbRefreshPositions() {
+  const broker = tpb.broker, generation = tpb.generation;
   try {
-    const r = await fetch(`/api/broker/positions?broker=${encodeURIComponent(tpb.broker)}`);
+    const r = await fetch(`/api/broker/positions?broker=${encodeURIComponent(broker)}`);
     if (!r.ok) return;
     const raw = await r.json();
+    if (tpb.broker !== broker || tpb.generation !== generation) return;
     // Normalise SPEC positions (side + unsigned qty, sl/tp, position_id,
     // epoch-ms opened_at) into the sim shape (signed qty, sl_price/tp_price,
     // id, ISO opened_at) so the dock table, the chart lines and the AI
@@ -15844,6 +20612,8 @@ async function tpbRefreshPositions() {
       avg_price: p.avg_price,
       sl_price: p.sl == null ? null : p.sl,
       tp_price: p.tp == null ? null : p.tp,
+      // A stop the broker trails (SPEC 4): its level moves with the price.
+      trail_points: p.trail_points || 0,
       unrealized_pnl: p.unrealized_pnl == null ? null : p.unrealized_pnl,
       opened_at: typeof p.opened_at === "number"
         ? new Date(p.opened_at).toISOString() : (p.opened_at || null),
@@ -15851,6 +20621,7 @@ async function tpbRefreshPositions() {
     // Ticket rows removed here too: the dock is the one
     // positions surface; see the same note in tpxRefreshPositions.
     tpx.positions = poss;
+    tpbSubscribe();
     acdPushChartLines();
     if (tpx.dockTab === "pos") acdRenderPositions(poss);
     else if (tpx.dockTab === "hist") acdRenderHistory();
@@ -15859,31 +20630,100 @@ async function tpbRefreshPositions() {
   } catch (e) { /* transient */ }
 }
 
-async function tpbOrder(side) {
-  const spec = tpbSpec();
-  if (!spec) { tpxSetMsg("no broker symbol", "err"); return; }
-  const qty = parseFloat($("tpx-qty").value);
-  if (!(qty > 0)) { tpxSetMsg("qty must be > 0", "err"); return; }
-  const body = { broker: tpb.broker, symbol: spec.symbol, side, qty };
-  const sl = parseFloat($("tpx-sl").value), tp = parseFloat($("tpx-tp").value);
-  if (sl > 0) body.sl = sl;
-  if (tp > 0) body.tp = tp;
-  tpxSetMsg("placing…");
+async function tpbOrder(side, again, fresh) {
+  let body;
+  if (again) {
+    // Asked again: exactly what was sent, under the same client_id.
+    body = { ...again.body };
+  } else if (fresh) {
+    // "Place as new" (tpxPlaceNew): what was sent, under a client_id of its
+    // own, after the question it asked.
+    body = { ...fresh, client_id: tpxNewClientId("") };
+  } else {
+    const spec = tpbSpec();
+    if (!spec) { tpxSay("no broker symbol", "err"); return; }
+    const qty = parseFloat($("tpx-qty").value);
+    if (!(qty > 0)) { tpxSay("qty must be > 0", "err"); return; }
+    body = { broker: tpb.broker, symbol: spec.symbol, side, qty };
+    const sl = parseFloat($("tpx-sl").value), tp = parseFloat($("tpx-tp").value);
+    if (sl > 0) body.sl = sl;
+    if (tp > 0) body.tp = tp;
+    // The same order pressed again while an earlier one's outcome is not
+    // known is asked again under that one's client_id: it cannot be placed
+    // twice. Any other request on its instrument meanwhile, an order at
+    // market or resting, a close or a cancel, is placed only on a yes
+    // (tpxHeldGate).
+    const go = await tpxHeldGate("order", body, "", "Place it", body.symbol);
+    if (!go) return;
+    body = go.body;
+    again = go.again;
+  }
+  const hold = (res, engine) => tpxHold({ kind: "order", broker: body.broker,
+    body: { ...body, client_id: (res && res.client_id) || body.client_id },
+    side: body.side, symbol: body.symbol, engine: !!engine, words: res && res.detail,
+    stillUnknown: !!again && !engine,
+    run: (h) => tpxOrder(h.side, h) });
+  tpxSetMsg(again ? "asking again…" : "placing…");
+  let r, res;
+  const answered = tpxSending("order", body, { side: body.side, symbol: body.symbol });
   try {
-    const r = await fetch("/api/broker/order", {
+    r = await fetch("/api/broker/order", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    const res = await readResult(r);
-    if (!r.ok) throw new Error(res.detail || r.status);
-    tpxSetMsg(res.status === "filled"
-      ? `${side} ${qty} filled @ ${res.fill ? res.fill.price : ""}`
-      : res.status + (res.reason ? ": " + res.reason : ""),
-      res.status === "filled" ? "ok" : "err");
-    tpbRefreshAccount(); tpbRefreshPositions();
+    res = await readResult(r);
   } catch (e) {
-    tpxSetMsg(tpbPlainReason(e.message || e).slice(0, 80), "err");
+    // No answer from the engine at all: the order may have reached the broker.
+    answered();
+    hold({ detail: String(e.message || e) }, true);
+    return;
   }
+  answered();
+  if (r.status === 403) {
+    // The engine refused because this broker is real money and this
+    // session was never allowed to trade it (SPEC 3). Shown whole, in the
+    // engine's own words, with where to change it: cut at 80 characters
+    // it read "…has not been armed. Cal" and told nobody what to do.
+    tpxSay(tpbNotArmedText(res.detail), "err");
+    return;
+  }
+  // Settled: answered, or refused by the broker for good. Anything else
+  // leaves the outcome of an order asked about again as unknown as it was.
+  const settled = r.ok || (r.status === 400 && !res.retryable);
+  if (!settled && res.unknown) {
+    hold(res, false);
+    tpbRefreshPositions();
+    return;
+  }
+  // asked again on another account than its own: Switch back (tpxOtherAccount)
+  if (again && tpxOtherAccount(again, r.status, res)) return;
+  if (!settled && again) {
+    tpxSay(tpbPlainReason(res.detail || r.status), "err");
+    return;
+  }
+  // What was sent under this client_id is known now. The broker's reason is
+  // shown whole.
+  tpxHeldDone(body.client_id);
+  if (!r.ok) {
+    tpxSay(tpbPlainReason(res.detail || r.status), "err");
+    return;
+  }
+  const said = res.status === "filled"
+    ? `${body.side} ${body.qty} ${body.symbol} filled @ ${res.fill && res.fill.price != null ? acdPxLine(body.symbol, res.fill.price) : ""}`
+    : res.status + (res.reason ? ": " + res.reason : "");
+  tpxSay((again ? "Asked again: " : "") + said, res.status === "filled" ? "ok" : "err");
+  tpbRefreshAccount(); tpbRefreshPositions();
+}
+
+/* The engine's refusal of an order on an unarmed live broker, for the ticket.
+   Its sentence is kept; the tail the connector writes for a programmer
+   ("Call arm(reason) first.") is replaced by where a person does that. */
+function tpbNotArmedText(detail) {
+  // The detail leads with the connector's code word ("not_armed: ..."),
+  // machine vocabulary the ticket drops everywhere else too (tpbPlainReason).
+  const said = tpbPlainReason(detail || "this broker has not been armed for trading")
+    .replace(/\s*Call arm\(reason\) first\.?\s*$/, "").replace(/[.\s]+$/, "");
+  return `${said}. Allow trading for it in Connections.`;
 }
 
 /* A broker refusal reaches the ticket as "<code>: <message>" (the connector's
@@ -15900,8 +20740,23 @@ function tpbPlainReason(text) {
 }
 
 function setupTradePanel() {
-  $("tpx-buy").onclick = () => tpxOrder("buy");
-  $("tpx-sell").onclick = () => tpxOrder("sell");
+  $("tpx-buy").onclick = (ev) => { if (tpxOnePress(ev)) tpxOrder("buy"); };
+  $("tpx-sell").onclick = (ev) => { if (tpxOnePress(ev)) tpxOrder("sell"); };
+  // Asks the broker again about a request whose answer was lost, under its
+  // own client_id (tpxHold): answered from the broker's record, never twice.
+  $("tpx-again").onclick = (ev) => { if (tpxOnePress(ev)) tpxAskAgain(); };
+  // Places that order again as a new one, after a yes, once asking again
+  // was answered that its fate is still not known (tpxPlaceNew).
+  $("tpx-new").onclick = (ev) => { if (tpxOnePress(ev)) tpxPlaceNew(); };
+  // Points the ticket at the broker whose held request the line names, which
+  // then holds it as its own (tpxShowBroker).
+  $("tpx-show").onclick = (ev) => { if (tpxOnePress(ev)) tpxShowBroker(); };
+  // Connects the broker, not connected, whose held request the line names,
+  // as its card's Connect does; that holds it again (tpxConnectHeld).
+  $("tpx-conn").onclick = (ev) => { if (tpxOnePress(ev)) tpxConnectHeld(); };
+  // Switches the broker back to the account a request went out on, when
+  // Ask again was refused for another account (tpxSwitchBack).
+  $("tpx-back").onclick = (ev) => { if (tpxOnePress(ev)) tpxSwitchBack(); };
   // One account door, not two. The ticket's own broker
   // select is hidden; the account line reports what the top-left connection
   // is bound to and opens that same screen to change it, so there is one
@@ -15960,8 +20815,15 @@ function setupTradePanel() {
   // maintains, so gate on it rather than tracking sub-tab state separately.
   const sync = () => {
     // no ticket (and no account probing) before a live key is configured:
-    // the login screen would otherwise log 401s on every visit
-    const markets = $("rail-markets").classList.contains("active") && !!state.lseConfigured
+    // the login screen would otherwise log 401s on every visit.
+    // A CONNECTED BROKER counts too. Someone who links their own broker and
+    // has no LSE key could chart it and then had no ticket to trade it from:
+    // the panel was gated on the key alone. Through a broker the ticket reads
+    // that broker's account, so there is no keyless call to refuse.
+    const viaBroker = tpbViaConnector() && (brokerPicker.rows || []).some(
+      (b) => b.broker === tpb.broker && b.connected);
+    const markets = $("rail-markets").classList.contains("active")
+      && (!!state.lseConfigured || viaBroker)
       && !$("charts").classList.contains("hidden");
     $("trade-panel").classList.toggle("hidden", !markets);
     $("rw-stack").classList.toggle("hidden", !markets);
@@ -15991,6 +20853,9 @@ function setupTradePanel() {
   // observe the bar itself. Delegated: renderSubrail rebuilds the buttons.
   const subbar = document.getElementById("subrail");
   if (subbar) subbar.addEventListener("click", () => setTimeout(sync, 0));
+  // Connecting or disconnecting a broker changes the answer too (tpbSwitch,
+  // brokerDisconnect), and neither is a rail click.
+  tpx.sync = sync;
   sync();
 
   // The ticket/assistant resize sash is gone:
@@ -16074,7 +20939,16 @@ async function rwTick(force) {
       if (w.type === "news") await rwPaintNews(body);
       else if (w.type === "econ") await rwPaintEcon(body);
       else if (w.type === "opts") await rwPaintOpts(body);
-      else if (w.type === "quotes") await rwPaintQuotes(body, w);
+      else if (w.type === "quotes") {
+        // Not awaited: its prices come with the terminal's next budgeted
+        // call (up to three seconds off), and the cards after it must not
+        // wait for that. One paint per card at a time.
+        if (!rw.busy) rw.busy = new Set();
+        if (!rw.busy.has(key)) {
+          rw.busy.add(key);
+          rwPaintQuotes(body, w).catch(() => {}).finally(() => rw.busy.delete(key));
+        }
+      }
     } catch (e) { /* transient; the next tick repaints */ }
   }
 }
@@ -16309,9 +21183,11 @@ async function rwPaintOpts(body) {
 async function rwPaintQuotes(body, w) {
   const syms = (w.cfg.symbols || []).filter(Boolean).slice(0, 20);
   if (!syms.length) { body.textContent = "no symbols set; click edit"; return; }
-  const r = await fetch(`/api/prices?provider=lse&symbols=${encodeURIComponent(syms.join(","))}`);
-  if (!r.ok) { body.textContent = "quotes unavailable"; return; }
-  const by = new Map((await r.json()).map((q) => [q.symbol, q]));
+  // Through the price desk: the card's symbols ride the terminal's one
+  // budgeted call (pollPrices) and never make one of their own.
+  const rows = await priceDeskPrices("lse", syms);
+  if (rows === null) { body.textContent = "quotes unavailable"; return; }
+  const by = new Map(rows.map((q) => [q.symbol, q]));
   let h = "";
   for (const s of syms) {
     const q = by.get(s);

@@ -39,6 +39,7 @@ import { isMarketOpenForPair } from '@/lib/marketHours';
 import { initWorkspaceBridge } from '@/lib/workspaceBridge';
 import { api, invalidateSection } from '@/lib/api';
 import { toCustomIndicators, type EngineIndicatorPayload } from '@/lib/engineIndicators';
+import { setPriceDigits, orderFormPrice } from '@/lib/utils';
 import './index.css';
 
 // Converter handed up by ProChart once it has laid out its axes. The overlay
@@ -86,6 +87,13 @@ export interface ChartProps {
   onPositionModify?: (id: string, sl?: number, tp?: number) => void;
   onPositionClose?: (id: string) => void;
   autoSelectPositionId?: string | null;
+  // The decimals a source declares for its instruments, by symbol (a
+  // broker's catalog), and the source they are (`priceSource`; else the
+  // `provider` pushed with them). Handed to the price formatter
+  // (setPriceDigits), never kept as props: the whole map, each time that
+  // source's change.
+  priceDigits?: Record<string, number> | null;
+  priceSource?: string | null;
 }
 
 interface TerminalChartProps extends ChartProps {
@@ -112,6 +120,12 @@ const ctxRow: React.CSSProperties = {
 };
 const onCtxRowIn = (e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = 'var(--hover)'; };
 const onCtxRowOut = (e: React.MouseEvent<HTMLElement>) => { e.currentTarget.style.background = 'transparent'; };
+// Two symbols are the one instrument when their letters and digits match, so a
+// chart spelt one way (a source's) and the ticket's instrument spelt another
+// (its broker's) are compared without their separators or case. The menu's
+// order rows show only when the chart shows the instrument the order goes to.
+const bareMatch = (a?: string | null, b?: string | null): boolean =>
+  !!b && String(a).replace(/[^A-Z0-9]/gi, '').toUpperCase() === String(b).replace(/[^A-Z0-9]/gi, '').toUpperCase();
 
 function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'candlestick', trades = [], engineIndicators, indicatorPatch = null, quote = null, positions = [], onPositionModify, onPositionClose, autoSelectPositionId = null }: TerminalChartProps) {
   const [converter, setConverter] = useState<Converter | null>(null);
@@ -138,7 +152,8 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
   // pointer is on the row.
   const [ctxMenu, setCtxMenu] = useState<{
     x: number; y: number; price: number | null; ref: number | null;
-    trade: { available: boolean; symbol?: string; qty?: number | null;
+    trade: { available: boolean; symbol?: string; instrument?: string;
+             digits?: number | null; tick?: number | null; qty?: number | null;
              pendingTypes?: string[] } | null;
   } | null>(null);
   const [tplOpen, setTplOpen] = useState(false);
@@ -522,7 +537,8 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
             x: Math.min(e.clientX, window.innerWidth - 240),
             // taller menu when the trading rows render; the clamp keeps the
             // whole thing on screen for clicks near the bottom edge
-            y: Math.min(e.clientY, window.innerHeight - (trade?.available ? 360 : 230)),
+            y: Math.min(e.clientY, window.innerHeight
+                 - (trade?.available && bareMatch(symbol, trade.instrument) ? 360 : 230)),
             price, ref: livePrice, trade,
           });
         }}
@@ -535,11 +551,13 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
             timeframe={timeframe}
             colors={colors}
             quote={quote}
+            priceSource={provider}
           />
         ) : (<>
         <ProChart
           candles={candles}
           symbol={symbol}
+          priceSource={provider}
           timeframe={timeframe}
           chartType={chartType}
           livePrice={livePrice}
@@ -725,7 +743,7 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
               cleaner and cannot invite a guaranteed rejection. All values
               come from the click snapshot, the placement itself is the
               ticket's (qty box, broker routing, result message). */}
-          {ctxMenu.trade?.available && (() => {
+          {ctxMenu.trade?.available && bareMatch(symbol, ctxMenu.trade.instrument) && (() => {
             const t = ctxMenu.trade!;
             const fp = (p: number) =>
               (window as any).__lseShell?.fmtPrice?.(p) ?? String(p);
@@ -756,7 +774,7 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
               };
               return (<>
                 <div style={{ ...ctxRow, cursor: 'default', fontWeight: 600 }}>
-                  {ordForm.side === 'buy' ? 'Buy' : 'Sell'} {cap(ordForm.otype)} · {t.symbol}
+                  {ordForm.side === 'buy' ? 'Buy' : 'Sell'} {cap(ordForm.otype)} · {t.instrument}
                 </div>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '2px 10px 4px' }}
                      onClick={(e) => e.stopPropagation()}>
@@ -789,8 +807,8 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
             }
             const qty = t.qty != null ? `${t.qty} ` : '';
             const rows: Array<{ label: string; side: string; otype: string }> = [
-              { label: `Buy ${qty}${t.symbol} at market`, side: 'buy', otype: 'market' },
-              { label: `Sell ${qty}${t.symbol} at market`, side: 'sell', otype: 'market' },
+              { label: `Buy ${qty}${t.instrument} at market`, side: 'buy', otype: 'market' },
+              { label: `Sell ${qty}${t.instrument} at market`, side: 'sell', otype: 'market' },
             ];
             const p = ctxMenu.price, ref = ctxMenu.ref;
             const types = t.pendingTypes || [];
@@ -822,10 +840,16 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
                     // NOT fp(): the shell's fmt is a display rounding (2dp
                     // between 10 and 1000) and would move an FX level by
                     // most of a pip (184.577 -> "184.58"). The prefill is
-                    // the order's actual price, so it keeps working
-                    // precision by magnitude.
+                    // the order's actual price: at the places the INSTRUMENT
+                    // the order goes to declares (t.digits), snapped to its
+                    // tick (t.tick), so a level read off one grid is put on
+                    // the order's own; the chart source's places
+                    // (orderFormPrice) only when the instrument declares none.
+                    // Six places of a five-place pair were refused by the broker.
                     setOrdPrice(p != null
-                      ? String(+p.toFixed(p >= 1000 ? 2 : p >= 100 ? 3 : p >= 1 ? 4 : 6))
+                      ? (t.digits != null
+                          ? (t.tick && t.tick > 0 ? Math.round(p / t.tick) * t.tick : p).toFixed(t.digits)
+                          : orderFormPrice(p, symbol, provider))
                       : '');
                     setOrdQty(t.qty != null ? String(t.qty) : '');
                     setOrdErr('');
@@ -972,9 +996,11 @@ function TerminalChart({ provider, symbol, timeframe, candles, chartType = 'cand
 // Each secondary pane is a self-contained light chart: ProChart only, no
 // drawing rail/overlay (drawings stay a primary-pane feature), own root and
 // props. The shell owns the grid, symbols and data; this is just the renderer.
-function PaneChart({ symbol, timeframe, candles, quote }: {
+function PaneChart({ symbol, timeframe, candles, quote, provider }: {
   symbol: string; timeframe: string; candles: Candle[];
   quote?: { bid: number; ask: number } | null;
+  // the source the pane shows, whose declared digits it prints with
+  provider?: string | null;
 }) {
   const chartSettings = useChartSettings();
   const colors = useMemo(() => getDefaultColors(), []);
@@ -985,6 +1011,7 @@ function PaneChart({ symbol, timeframe, candles, quote }: {
     <ProChart
       candles={candles}
       symbol={symbol}
+      priceSource={provider}
       timeframe={timeframe}
       chartType="candlestick"
       livePrice={candles[candles.length - 1]?.close ?? null}
@@ -1118,6 +1145,13 @@ function normalise(next: Partial<ChartProps>): Partial<ChartProps> {
   if (next.trades?.length && next.trades[0].time < MS_THRESHOLD) {
     out.trades = next.trades.map((t) => ({ ...t, time: t.time * 1000 }));
   }
+  // A source's declared decimals go to the price formatter, kept by that
+  // source, not to props.
+  if ('priceDigits' in next) {
+    setPriceDigits(next.priceDigits, 'priceSource' in next ? next.priceSource : next.provider);
+    delete out.priceDigits;
+  }
+  delete out.priceSource;
   return out;
 }
 

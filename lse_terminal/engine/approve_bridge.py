@@ -80,9 +80,20 @@ CAPABILITY_TOOLS = [
      "inputSchema": {"type": "object", "properties": {}}},
     {"name": "get_candles",
      "description": "Recent OHLCV candles from the terminal for a symbol "
-                    "(defaults to the chart the user has open).",
+                    "(defaults to the chart the user has open). Use provider "
+                    "lse for LSE market data and preserve its exact symbol, "
+                    "for example BTC/USD, EUR/USD, SP500.F or VOD.UK. Local "
+                    "MY DATA names identify different datasets; do not "
+                    "substitute or remove punctuation. The newest candle "
+                    "may still be forming. Use candles_utc and "
+                    "latest_completed_candle for UTC times/completion; "
+                    "do not convert epoch timestamps mentally.",
      "inputSchema": {"type": "object", "properties": {
-         "symbol": {"type": "string"}, "timeframe": {"type": "string"},
+         "provider": {"type": "string", "description":
+                      "lse for LSE market data; otherwise the chart provider"},
+         "symbol": {"type": "string", "description":
+                    "Exact provider symbol, e.g. BTC/USD; defaults to the chart"},
+         "timeframe": {"type": "string"},
          "limit": {"type": "integer", "maximum": 500}}}},
     {"name": "list_datasets",
      "description": "The user's imported MY DATA datasets (names, kinds, "
@@ -147,18 +158,17 @@ CAPABILITY_TOOLS = [
          "order": {"type": "string", "description": "asc (default) or desc"},
          "limit": {"type": "integer", "maximum": 1000}}}},
     {"name": "import_lse_data",
-     "description": "Download history from the LSE databank (the vault "
-                    "behind the user's key) into their library, like the "
-                    "Import from LSE dialog: pick a dataset class + symbol + "
-                    "timeframe and it lands as a chartable dataset (tick "
-                    "pulls stay Parquet files). Waits up to ~90s; a deep "
-                    "pull returns status + job_id, call again with job_id to "
-                    "finish. Uses the user's monthly databank quota.",
+     "description": "Import available LSE market candles, economic series or bond "
+                    "yields into the local library using your key. Reads complete "
+                    "pages within key limits and preserves the source values. "
+                    "Tick history, options and reference exports are unavailable. "
+                    "Waits up to ~90s; longer imports return status + job_id. "
+                    "Call again with job_id to check completion. Uses the key's data quota.",
      "inputSchema": {"type": "object", "properties": {
          "dataset": {"type": "string",
                      "description": "class: fx, stocks, crypto, etf, index, commodity, ..."},
-         "symbol": {"type": "string", "description": "e.g. XAUUSD"},
-         "timeframe": {"type": "string", "description": "tick, 1m, 1h (default), 1d, ..."},
+         "symbol": {"type": "string", "description": "e.g. XAU/USD"},
+         "timeframe": {"type": "string", "description": "1s, 30s, 1m, 5m, 15m, 30m, 1h (default), 4h, 1d, 1w; ignored for series"},
          "from": {"type": "string", "description": "YYYY-MM-DD"},
          "to": {"type": "string", "description": "YYYY-MM-DD"},
          "folder": {"type": "string", "description": "library folder, default LSE"},

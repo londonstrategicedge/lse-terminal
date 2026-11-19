@@ -1,0 +1,46 @@
+{
+  "pass": true,
+  "checks": [
+    {
+      "case": "exact_inputs",
+      "pass": true
+    },
+    {
+      "case": "unretained_sdk_rejected",
+      "pass": true
+    },
+    {
+      "case": "modified_sdk_rejected",
+      "pass": true
+    },
+    {
+      "case": "unproved_adapter_rejected",
+      "pass": true
+    },
+    {
+      "case": "nonpublic_channel_rejected",
+      "pass": true
+    },
+    {
+      "case": "nonpublic_appid_rejected",
+      "pass": true
+    },
+    {
+      "case": "nonpublic_product_rejected",
+      "pass": true
+    },
+    {
+      "case": "nonpublic_feed_rejected",
+      "pass": true
+    },
+    {
+      "case": "unpinned_dependency_rejected",
+      "pass": true
+    },
+    {
+      "case": "restored_inputs_pass",
+      "pass": true
+    }
+  ],
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]"
+}

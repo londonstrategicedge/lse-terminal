@@ -1,0 +1,709 @@
+{
+ "generated": "2026-10-27T02:25:09Z",
+ "items": [
+  {
+   "title": "Beliefs Over Contracts",
+   "link": "https://www.nber.org/papers/w35788#fromrss",
+   "summary": "We study how firms choose among incentive contracts and how accurately managers predict their effects. Using a survey of managerial beliefs and a large-scale field experiment, we randomly assign agents at the market level to several widely used, expenditure-equivalent incentive schemes. In the field, the best-performing contract raises weekly firm profit by over 55% relative to the status quo, despite being ranked lower by managers, whereas the worst-performing contract performs as predicted. Managers reliably avoid poorly performing contracts but systematically underestimate top-performing ones. Standard contract theory does better as a forecaster here: an unbiased textbook principal orders the contracts correctly, or very nearly so, correctly identifying the profit leader where managers do not; where it does miss, the error is similar to managers’ and for a similar reason.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Francis Annan",
+    "Collin B. Raymond"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/4d6912719b5e186e080669727fdfcbf24b033707.jpg"
+  },
+  {
+   "title": "HouseholdBench: Evaluating Large Language Models as Predictors of Household Economic Behavior",
+   "link": "https://www.nber.org/papers/w35927#fromrss",
+   "summary": "Large language models (LLMs) have the potential to meet a key goal in economics: a quantitative model of household decision making, across a variety of settings. Yet existing evaluations cover few surveys and outcomes, and do not study how households adjust to changing economic conditions. We introduce a new evaluation, HouseholdBench, which unites 6 U.S. household surveys and 32 prediction tasks spanning numeric, categorical and probabilistic outcomes, related to consumption, income, labor, expectations, and housing. Using past behavior, demographics and macroeconomic conditions, the tasks test whether LLMs predict behavior, including how households adjust to changes in various policies. We evaluate 13 proprietary and open-weight LLMs against a no-change baseline and a gradient boosted tree model.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Jin Huang",
+    "Diego Ferreras Garrucho",
+    "Yutong Xie",
+    "Walter M. Yuan",
+    "Qiaozhu Mei",
+    "Chen Lian"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/ef25b456898b701e81232bf8bd2db1ef1b87031e.jpg"
+  },
+  {
+   "title": "Strategic Monetary Policy in Open Economies",
+   "link": "https://www.nber.org/papers/w35928#fromrss",
+   "summary": "We examine optimal non-cooperative monetary policy in a two-country New Keynesian setting with complete financial markets and pricing to market for goods. In contrast to the case in which the law of one price holds for goods, currency misalignments are an important consideration even for self-oriented policymakers. Financial markets are critical in the analysis. Under “full” commitment, the optimal policy considers the effects on asset values and hence wealth distribution across countries. Optimal policy under full commitment differs from the “partial” commitment case in which the policy commitment is not made until after asset markets clear. Surprisingly, the optimal targeting rule under strategic policy with full commitment is the same as under cooperative policy.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Louphou Coulibaly",
+    "Charles Engel"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/0651373a2408fae583c7409231a55d7bbdec8672.jpg"
+  },
+  {
+   "title": "Insuring Landlords",
+   "link": "https://www.nber.org/papers/w35932#fromrss",
+   "summary": "This paper shows that insuring landlords against non-payment risk can improve housing access and upward geographic mobility for fragile tenants. We study Visale, a large-scale publicly funded rent guarantee insurance policy in France, free for eligible tenants and landlords. Using administrative household and claim payout data and quasi-experimental eligibility variation by exact age, we show the guarantee increased access to private-sector rental housing, especially for immigrants, newly formed households, and low-income renters. The scheme eased long-distance mobility toward expensive, high-wage neighborhoods at a moderate fiscal cost per marginal move, though potentially displacing comparable ineligible tenants through higher rents.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Thomas Bézy",
+    "Antoine B. Levy",
+    "Timothy McQuade"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/1b0826eb489cb6147847398eb825c57b09da2031.jpg"
+  },
+  {
+   "title": "Tax Productivity and Economic Development: A Quantitative Macroeconomic Analysis",
+   "link": "https://www.nber.org/papers/w35934#fromrss",
+   "summary": "This paper examines the role of government capacity to collect taxes in driving economic development. We first draw on a new macro-historical database to document that tax collections relative to tax administration expenditures rise sharply with GDP per capita. We then interpret this finding in a neoclassical growth model with a tax administration sector in which labor inputs are required to raise tax revenues. Countries differ in their levels of tax productivity, capturing how effectively labor is used to raise taxes, as well as their levels of productivity in creating consumption and investment goods. Governments use tax revenues to provide public capital that complements private factors in production and to make transfers.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Radhika Goyal",
+    "Anders Jensen",
+    "David Lagakos",
+    "Abdoulaye Ndiaye",
+    "Yuntian Zhao"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/04958cb818a9fe6e12485234210af59ede771591.jpg"
+  },
+  {
+   "title": "Sex and Subsistence: Income Effects on Risky Sexual Behavior and Partner Selection",
+   "link": "https://www.nber.org/papers/w35940#fromrss",
+   "summary": "Whether to engage in sex and with whom are extremely consequential decisions for young women worldwide, and particularly in sub-Saharan Africa, where HIV rates are high and adolescent pregnancies are common. Yet little is known about the extent to which these decisions are financially motivated. We combine a randomized controlled trial of monthly cash assistance to female students at the University of Zambia with detailed, high-frequency data on sexual behavior and partner characteristics. We find that this temporary increase in income significantly changes women's sexual behavior. Treated participants are 5.1 percentage points less likely to have sex during the treatment period, and the rate of condomless sex falls by 30%. Among women who were not sexually active at baseline, the likelihood of having sex falls by 43%, and partner quality conditional on sex greatly improves.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Natalie Bau",
+    "Corinne Low",
+    "Bryce Steinberg"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Microstructure & Trading",
+   "thumb": "/research-thumbs/1d88a369bce99eb4941aa07c1488502c5fb61d97.jpg"
+  },
+  {
+   "title": "Comparative Advantage and Economies of Scale under Uncertainty",
+   "link": "https://www.nber.org/papers/w35942#fromrss",
+   "summary": "We study how regional specialization patterns and welfare are affected by uncertainty and economies of scale in an open economy. We use a spatial equilibrium model with sectoral economies of scale, aggregate uncertainty, and irreversible mobility decisions made by heterogenous workers. We analytically characterize how the interactions between comparative advantage, both of workers and firms, economies of scale, and uncertainty shape specialization patterns and, hence, the gains from trade. We find empirical support for the model predictions by documenting the impact of aggregate changes in volatility of sectoral productivity on U.S. regional economies. We calibrate the model using detailed data on U.S. commuting zones and international trade, and extending hat-algebra methods to accommodate uncertainty.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Xiao Ma",
+    "Natalia Ramondo"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/566f2f49d01e906026e8b8c847f5470d79efda1a.jpg"
+  },
+  {
+   "title": "An LLM Workflow for Functional Form Sensitivity Analysis",
+   "link": "https://www.nber.org/papers/w35947#fromrss",
+   "summary": "We introduce an LLM workflow for functional form sensitivity analysis. A researcher estimates the value of an object of interest by maximizing the fit of a working model to some data. The working model assumes an arbitrary form for some function. We define sensitivity by how much it is possible to change the estimate of the object of interest, without compromising fit, by selecting a different functional form. The workflow first looks for an analytic solution. If it fails to find one, it approximates the solution via numerical methods that respect the fit constraint at each step of a solver path. The workflow yields a verifiable lower bound on the in-sample sensitivity of the researcher’s estimate, and is fast in many practical situations. We illustrate with an application to the welfare cost of adverse selection in health insurance.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Isaiah Andrews",
+    "Simon C. Essig Aberg",
+    "Jesse M. Shapiro"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/8e188f9261e62401f4496647747ec258457cee0b.jpg"
+  },
+  {
+   "title": "fevc: Leave-Out Bias-Corrected Variance Decompositions in Stata",
+   "link": "https://www.nber.org/papers/w35948#fromrss",
+   "summary": "Variance decompositions from regressions with worker and firm fixed effects are widely used to measure heterogeneity and sorting in linked data. Variances computed directly from estimated effects overstate heterogeneity because they include estimation noise, and the bias can be large when few workers move between firms. This article introduces fevc, a Stata command that implements the leave-out bias correction of Kline, Saggio, and Sølvsten (2020, “Leave-Out Estimation of Variance Components,” Econometrica 88: 1859–1898). fevc reports corrected variances of worker and firm effects, their covariance, and the variance of their sum. Researchers choose the unit left out, the treatment of controls, and the weights that define the population being described. The command also reports standard errors for projections of fixed effects on observed characteristics.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Johannes F. Schmieder"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/a0473d2876de043a4cdebdb10bd13b3e2723d689.jpg"
+  },
+  {
+   "title": "Generative AI, Managerial Expectations, and Economic Activity",
+   "link": "https://www.nber.org/papers/w35949#fromrss",
+   "summary": "Using generative AI, we extract managers’ economic expectations from over 120,000 corporate conference call transcripts. The resulting AI Economy Score predicts GDP growth, production, employment, and wages five or more quarters ahead, beyond survey forecasts and other existing measures. Industry- and firm-level scores capture sector- and firm-specific activity, and a composite of firm, industry, and macroeconomic expectations further improves forecasting power and horizon. Predictability concentrates among historically more accurate, less biased managers, consistent with an information rather than a noise channel. Managerial expectations thus offer incremental insights into economic activity, with implications for macro- and microeconomic decision-making.",
+   "published": "2026-10-27T02:25:05Z",
+   "authors": [
+    "Manish Jha",
+    "Jialin Qian",
+    "Michael Weber",
+    "Baozhong Yang"
+   ],
+   "tags": [],
+   "source": "NBER",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/794c5590f94037b6123c9d6fc92880b33c78c702.jpg"
+  },
+  {
+   "title": "Scenario Matching for Credit Dependence Stress Tests: Temporal correlation constraints and empirical risk bounds",
+   "link": "https://arxiv.org/abs/2610.35118v1",
+   "summary": "We couple two sets of simulated market and credit paths by minimizing absolute temporal-correlation error relative to a prescribed target. Each market path receives exactly one credit path, preserving both empirical distributions of complete scenarios. A perfect-matching test identifies whether a uniform correlation-error tolerance is feasible and determines its smallest attainable value. Further assignments give exact empirical mean-loss and exceedance-probability bounds; quantile bounds follow by binary search over eligible loss thresholds. A synthetic bond-forward credit stress test illustrates the method. The experiments report matching precision, empirical score tails and exposure-grid error, and measure matching and mean-loss computation. The method is independent of the scenario generator and provides a reproducible way to examine dependence assumptions in existing risk engines.",
+   "published": "2026-10-26T09:55:54Z",
+   "authors": [
+    "Naoufal Nifa"
+   ],
+   "tags": [
+    "q-fin.CP"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/bf2d20346311df8cc890346eef0f70d2d1b55f4c.jpg"
+  },
+  {
+   "title": "Martingality in EFM Signature Volatility Models",
+   "link": "https://arxiv.org/abs/2610.35022v1",
+   "summary": "We establish a martingality criterion for the Exponentially Fading Memory (EFM) signature volatility model, extending the recent result of Abi Jaber, Gassiat, and Sotnikov (2026). In the proposed framework, the volatility process is given by a linear functional of the EFM signature of a time-augmented Brownian motion, which yields a globally well-behaved, fully non-Markovian volatility model admitting a stationary distribution. The stationary EFM signature volatility model is also covered by allowing for a random initial value of the signature. Moreover, the volatility process can be adjusted to the initial forward variance curve. For this model, excluding trivial cases, we prove that the price process is a true martingale if and only if the truncation order is odd and a sign condition involving the correlation parameter holds.",
+   "published": "2026-10-26T08:32:56Z",
+   "authors": [
+    "Dimitri Sotnikov",
+    "Adeline Viot"
+   ],
+   "tags": [
+    "q-fin.MF"
+   ],
+   "source": "ARXIV",
+   "category": "Options & Volatility",
+   "thumb": "/research-thumbs/a249345bd3a8f91bb4df0fb7e73752a073bb6c8c.jpg"
+  },
+  {
+   "title": "Det-MASO: Diversity-Regularized Multi-Agent Sequential Optimization for Factor Generation",
+   "link": "https://arxiv.org/abs/2610.34936v1",
+   "summary": "Quantitative investment requires alpha factors that are both predictive and diverse. However, existing factor generation methods, including formulaic mining and neural end-to-end models, are mostly based on a single-agent design, which limits exploration of the factor space and reduces adaptability to changing markets. Multi-agent approaches can broaden exploration, but agents trained under a shared objective often collapse to similar outputs, while existing diversity techniques either scale poorly with asset-universe size or address redundancy only after training. We propose a multi-agent sequential optimization (Det-MASO) framework for generating diversified, context-adaptive alpha factors.",
+   "published": "2026-10-26T07:03:00Z",
+   "authors": [
+    "Tiantian Wu",
+    "Peng Yang"
+   ],
+   "tags": [
+    "q-fin.CP"
+   ],
+   "source": "ARXIV",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/5f4f3042ce6b3696248d6bacd823416e71300668.jpg"
+  },
+  {
+   "title": "Do Round Numbers Hold Prices? Occupation Densities and Depth-Conditioned Hazards in the Limit Order Book",
+   "link": "https://arxiv.org/abs/2610.34787v1",
+   "summary": "Prices cluster at round numbers, a pattern often interpreted as evidence that these levels act as price barriers. This pattern also admits a mechanical explanation: more liquidity rests there, and prices take longer to leave deeper queues. Limit order book data allow us to distinguish these mechanisms through a tick-grid framework in which local time counts departures and level-wise volatility reflects the departure hazard. Using data for five Nasdaq stocks throughout 2025, we find that round levels attract more liquidity but do not exhibit longer depth-adjusted durations. Intel and SoFi show directional effects, with departures biased away from round levels.",
+   "published": "2026-10-26T03:31:11Z",
+   "authors": [
+    "Jiwon Jung",
+    "Kiseop Lee"
+   ],
+   "tags": [
+    "q-fin.TR",
+    "q-fin.ST"
+   ],
+   "source": "ARXIV",
+   "category": "Microstructure & Trading",
+   "thumb": "/research-thumbs/6e72d40ff4e9ed4e3fc2fbe11b53e4ec005f55a5.jpg"
+  },
+  {
+   "title": "Optimal ratcheting dividend policies with resets",
+   "link": "https://arxiv.org/abs/2610.34348v1",
+   "summary": "We study an optimal dividend policy problem under ratcheting and bankruptcy constraints. Firms face a tradeoff between the negative signal of a dividend reduction and a potential future bankruptcy. In contrast to previous works, the dividend rate is allowed to decrease after incurring a negative impact on equity valuation in accordance with a large empirical literature on the topic. We provide an explicit necessary and sufficient condition for the finiteness of the value function and prove the differentiability of the value function, and its characterization via viscosity solutions and the so-called supercontact property. The value function is given by the solution of a two-dimensional variational inequality combining optimal stopping, singular and impulse controls. We show that the problem is equivalent to a one-dimensional setup simplifying both mathematical and financial analysis.",
+   "published": "2026-10-25T15:02:30Z",
+   "authors": [
+    "Alexandre Roch",
+    "Simone Scotti"
+   ],
+   "tags": [
+    "q-fin.MF",
+    "q-fin.PR"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/6afaed78c0e634fad3c33a1796faa4bfaf24a964.jpg"
+  },
+  {
+   "title": "Certifying Reward Alignment in Portfolio Reinforcement Learning",
+   "link": "https://arxiv.org/abs/2610.34153v1",
+   "summary": "Financial reinforcement learning often translates an investment objective into an additive risk-adjusted reward. An agent can optimise that reward accurately yet implement a different financial preference. We develop a decision audit for terminal mean-variance equilibrium that separates reward misspecification from learning error. In a finite exogenous-state market, we bound the gain from changing one action using actor, reward and continuation-critic residuals. The certificate ignores state-constant critic offsets, accommodates convex action constraints, and has an independent-sample extension that does not require the equilibrium policy. A continuation-aware actor-critic method estimates the future-policy correction from samples. Across nine controlled markets and twenty seeds, it reduces policy distance by and one-step deviation gain by relative to a matched myopic-reward network.",
+   "published": "2026-10-25T08:38:59Z",
+   "authors": [
+    "Matin Tavakoli",
+    "Seyedreza Tavakoli",
+    "Faezeh Salmani",
+    "Amir Amini",
+    "Mohammad Hosein Rohban",
+    "Gholamali Aminian"
+   ],
+   "tags": [
+    "q-fin.PM"
+   ],
+   "source": "ARXIV",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/5fcb59c48241cb2666c3948ceb78e04d821c6da4.jpg"
+  },
+  {
+   "title": "Jensen gaps and the decomposition principle",
+   "link": "https://arxiv.org/abs/2610.33786v1",
+   "summary": "We provide axiomatic characterizations of Jensen-gap functionals, which have the form $ρ(X)=\\mathbb{E}[f(X)]-f(\\mathbb{E}[X])$ for some real-valued function $f$ called the generator. This class includes important examples such as the excess growth rate, the utility premium, the Kullback-Leibler (KL) divergence, and the variance, and is also closely related to measures of variability. We analyze various forms of convexity for Jensen gaps. To characterize Jensen gaps, we formulate conditional versions of law-invariant functionals, which are needed to state the decomposition principle. On an atomless probability space, we show that law invariance together with a binary decomposition principle is sufficient to characterize Jensen gaps on simple random variables.",
+   "published": "2026-10-24T16:41:36Z",
+   "authors": [
+    "Lilian Hu",
+    "Ruodu Wang"
+   ],
+   "tags": [
+    "q-fin.MF"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/499a3217446cb4f51ffda59bf24e48019768e108.jpg"
+  },
+  {
+   "title": "What FLARE's Published Numbers Actually Measure",
+   "link": "https://arxiv.org/abs/2610.33604v1",
+   "summary": "We audit the scoring pipeline of FLARE, the financial task suite behind PIXIU and FinBen, and find that in a decisive fraction of cells the score is a property of the answer-extraction rule, not the model. The clearest evidence is already published: of the 34 released Headlines scores, nine equal to four decimals what the benchmark's own code returns when no output is byte-equal to Yes, and only four clear the per-stratum majority floor. FLARE credits the first entry of the dataset card's choices list found anywhere in a generation; the lm-evaluation-harness it forks takes the first match by position; on identical generations the two differ by up to 0.4216 accuracy, and no leaderboard states which rule produced its numbers.",
+   "published": "2026-10-24T11:03:48Z",
+   "authors": [
+    "Dung Cao",
+    "Palaash Gang",
+    "Arjun Veluri"
+   ],
+   "tags": [
+    "q-fin.GN"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/1fa8080edb39079db6f0e66e609c6c2adb511fff.jpg"
+  },
+  {
+   "title": "Optimal portfolio choice under green transition timing risk",
+   "link": "https://arxiv.org/abs/2610.33597v1",
+   "summary": "We study an investor's optimal portfolio choice problem when they account for the impact of a possible future green transition, whose timing is uncertain. We model the green transition as a discontinuity in the stock price processes, driven by a single jump process with constant intensity, in which 'green' stocks increase in value and 'brown' stocks decrease in value. The investor is ambiguous about the timing of the green transition and designs an investment strategy which is robust to this risk. The investor has constant relative risk aversion preferences over both wealth and model ambiguity, which introduce a multiplicative ambiguity penalty for power utility and an additive ambiguity penalty for log utility. We separate the problem into pre- and post-transition cases, derive the solution, and provide a verification theorem.",
+   "published": "2026-10-24T10:48:43Z",
+   "authors": [
+    "Emma Kroell",
+    "Mogens Steffensen"
+   ],
+   "tags": [
+    "q-fin.MF",
+    "q-fin.PM",
+    "q-fin.RM"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/c5c55a0fe92a876dde458f5bc1eca52bd87be40e.jpg"
+  },
+  {
+   "title": "Tokenised Sukuk: A Verifiable Architecture for Asset Evidence and Programmable Shariah Compliance",
+   "link": "https://arxiv.org/abs/2610.33538v1",
+   "summary": "Security-token standards such as ERC-3643 decide who may hold a token, not what stands behind it. For a sukuk this gap matters: whether a certificate may trade at a negotiated price depends on what its portfolio contains, and a token that checks only investor identity keeps trading after every non-debt asset has been sold. We ask whether this tradability condition can be enforced on-chain, and at what cost. We encode the tradability conditions of the 2023 resolution of the Shariah Advisory Council of the Securities Commission Malaysia on Sukuk Wakalah bi al-Istithmar as issuance and transfer policies that read EIP-712 claims, signed by separate institutional roles, about each asset's rights, valuation, encumbrance and Shariah classification and about the allocation of proceeds.",
+   "published": "2026-10-24T08:33:46Z",
+   "authors": [
+    "Rischan Mafrur",
+    "Khadijah",
+    "Gun Gun Febrianza"
+   ],
+   "tags": [
+    "q-fin.CP"
+   ],
+   "source": "ARXIV",
+   "category": "Digital Assets",
+   "thumb": "/research-thumbs/6e9d0aca04ed672274663b37d64063550f617ec0.jpg"
+  },
+  {
+   "title": "Cross-Bond Panel Learning for Next-Day Price Forecasting of Chinese Convertible Bonds: A Reality Check",
+   "link": "https://arxiv.org/abs/2610.33453v1",
+   "summary": "Recent advances in financial machine learning have prompted growing interest in applying deep neural networks to convertible bond valuation and forecasting. However, existing studies often focus on in-sample valuation fit or cross-sectional return rankings, leaving out-of-sample next-day price forecasting insufficiently benchmarked against persistence. This paper provides a comprehensive empirical reality check on cross-bond panel learning for Chinese convertible bonds. Using a daily panel of 73,806 observations across 100 A-share convertible bonds from 2022 to 2025, we evaluate whether cross-bond neural architectures reliably outperform the random walk under strict temporal splitting, boundary purging, fold-specific preprocessing, and dependence-aware inference. On the 29,514-observation holdout, the random walk achieves an RMSE of 2.3577 CNY.",
+   "published": "2026-10-24T05:15:41Z",
+   "authors": [
+    "Derun Zhong",
+    "Guolian Wang",
+    "Shiqing Wang",
+    "Hongjie Feng"
+   ],
+   "tags": [
+    "q-fin.CP"
+   ],
+   "source": "ARXIV",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/d994cf7fde37bc025f390dc04109c04965f7b441.jpg"
+  },
+  {
+   "title": "Compiling and forecasting implied volatility surfaces via survey sampling, tempered inverse-probability sequence learning, and causal activity clocks",
+   "link": "https://arxiv.org/abs/2610.33438v1",
+   "summary": "Compiling implied volatility (IV) surfaces and forecasting derivative risk from high-frequency equity and options feeds requires addressing contract heterogeneity, schema shifts, volatility clustering, and non-stationary trading activity. Using a split-adjusted NVIDIA (NVDA) equity and options panel (2018-2025), this study integrates finite-population survey sampling, tempered inverse-probability sequence learning, and causal activity clocks. Four findings emerge. First, cross-sectional surface accuracy depends on matching the sampling design to the target functional: plug-in stratified allocations using lagged cell dispersion improve equal-weighted surface reconstruction with full grid coverage, whereas liquidity-weighted probability proportional to size (PPS) sampling excels on liquidity-weighted targets by construction yet inflates error when misapplied.",
+   "published": "2026-10-24T04:27:14Z",
+   "authors": [
+    "Deepak Bastola",
+    "Eli Prushansky"
+   ],
+   "tags": [
+    "q-fin.ST"
+   ],
+   "source": "ARXIV",
+   "category": "Options & Volatility",
+   "thumb": "/research-thumbs/b1050cabb9e7e0b0e95e850960067e99557d93e4.jpg"
+  },
+  {
+   "title": "Tracking High-Frequency Trading Activity in China and Its Effects on Market Quality",
+   "link": "https://arxiv.org/abs/2610.33400v1",
+   "summary": "We develop a new order-level proxy for high-frequency trading (HFT) activity based on precise order placement and study its effects on market quality. With quotes updating multiple times per second, millisecond-level order-book access makes high-frequency traders more likely to submit active exact-match orders, defined as limit orders priced exactly at the prevailing best opposite-side quote. Using Shenzhen Stock Exchange data, we validate the proxy: active exact-match orders respond faster to quote updates, cancel more rapidly, concentrate when depth imbalance is favorable and spreads are narrow, and predict mid-quote returns from 100 milliseconds through ten minutes. A difference-in-differences design exploiting cross-channel variation in order dissemination latency at the market open shows that lower latency increases active exact-match shares.",
+   "published": "2026-10-24T02:22:20Z",
+   "authors": [
+    "Li Guo",
+    "Frank Weikai Li",
+    "Ding Qi",
+    "Lijian Sun"
+   ],
+   "tags": [
+    "q-fin.TR"
+   ],
+   "source": "ARXIV",
+   "category": "Microstructure & Trading",
+   "thumb": "/research-thumbs/60f08def29ed36b181fa882a66e79428d2fbe43d.jpg"
+  },
+  {
+   "title": "On the continuity of conditional distributions and stratification for derivative pricing",
+   "link": "https://arxiv.org/abs/2610.32970v1",
+   "summary": "Stratification can reduce the estimator variance in Monte Carlo simulations by partitioning the sample space according to a low-dimensional factor and sampling separately within the resulting strata, making it well suited to the valuation of path-dependent claims in high-dimensional financial models. Its performance, however, depends critically on the choice of the stratification factor, and effective low-dimensional factors are generally difficult to identify in complex continuous-time models. Neural networks provide a flexible approximation class for this purpose and have proved useful in related variance-reduction problems in quantitative finance. In this paper, we study the construction of neural stratification factors for derivative pricing under proportional allocation in continuous-time models.",
+   "published": "2026-10-23T17:57:09Z",
+   "authors": [
+    "Aleksandar Arandjelovic",
+    "Patrick Cheridito"
+   ],
+   "tags": [
+    "q-fin.CP",
+    "q-fin.MF"
+   ],
+   "source": "ARXIV",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/1e6eb9d734336cdb6d282d87d8e8833129c360d1.jpg"
+  },
+  {
+   "title": "Optimal collective investment under regulatory uncertainty",
+   "link": "https://arxiv.org/abs/2610.32959v1",
+   "summary": "We study optimal collective investment subject to a Value-at-Risk (VaR)-type constraint that accounts for uncertainty about future regulatory requirements. The constraint incorporates several possible wealth thresholds and imposes a minimum weighted average probability of meeting them. We characterize the optimal terminal wealth, which combines regions of constant wealth at regulatory thresholds with Merton-type investment regions. Unlike a classical VaR constraint with only one threshold, our formulation generates protection against several thresholds. For two possible thresholds, we identify when both are protected and when protection concentrates on the larger one.",
+   "published": "2026-10-23T17:50:55Z",
+   "authors": [
+    "An Chen",
+    "Christian Laudagé",
+    "Shihao Zhu"
+   ],
+   "tags": [
+    "q-fin.PM",
+    "q-fin.MF",
+    "q-fin.RM"
+   ],
+   "source": "ARXIV",
+   "category": "Portfolio & Factors",
+   "thumb": "/research-thumbs/65e8d84bdb9c442614d2380bdb265528fd1bd7b0.jpg"
+  },
+  {
+   "title": "A Stationary Mean-Field Model for Carbon Market Stability Reserve",
+   "link": "https://arxiv.org/abs/2610.33132v1",
+   "summary": "We formulate the design of a market stability reserve as a stationary mean-field singular control problem. The allowance balance follows a regime-switching diffusion, while the regulator injects or withdraws allowances through bounded-variation controls. The objective trades off the average allowance balance, its stationary dispersion, deviations from a long-run target, and intervention costs. The optimal policy is a regime-dependent band rule characterized by four reflecting thresholds. Its computation reduces to a scalar fixed-point problem combining a coupled variational inequality with the invariant distribution of the reflected process. A calibration to the EU ETS yields thresholds of the same order of magnitude as the existing Market Stability Reserve rule.",
+   "published": "2026-10-23T13:41:08Z",
+   "authors": [
+    "René Aïd",
+    "Federico Cannerozzi",
+    "Giorgio Ferrari"
+   ],
+   "tags": [
+    "q-fin.MF"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/92b7001366f31ee2c059ab619b08771dc531f07a.jpg"
+  },
+  {
+   "title": "Risk Adequacy and Anti-Discrimination in Insurance Pricing: Classification, Aggregation, and Transfers",
+   "link": "https://arxiv.org/abs/2610.32614v1",
+   "summary": "Insurance tariffs must reconcile risk-based pricing, portfolio coverage, and anti-discrimination requirements. We introduce a framework in which tariffs are constructed through classification, aggregation of benchmark risk prices within classes, and balanced transfers, and are evaluated by several distinct criteria. This yields a multi-objective tariff-design problem whose attainable objective set and Pareto frontier describe the resulting trade-offs. Risk adequacy is measured by the discrepancy between charged premiums and individual benchmark risk prices. Portfolio coverage is assessed through the capital required to make aggregate claims net of premium income acceptable. Anti-discrimination is examined through differences in protected-group composition across tariff classes and through premium effects experienced by protected groups.",
+   "published": "2026-10-23T13:34:15Z",
+   "authors": [
+    "Wiebke Hansen",
+    "Stefan Weber",
+    "Mario Wüthrich"
+   ],
+   "tags": [
+    "q-fin.RM",
+    "q-fin.MF"
+   ],
+   "source": "ARXIV",
+   "category": "Risk",
+   "thumb": "/research-thumbs/ad4513e6b1f78712a30609625cb0f69b2b8a1f4c.jpg"
+  },
+  {
+   "title": "Duality of Shortfall Aversion",
+   "link": "https://arxiv.org/abs/2610.32350v1",
+   "summary": "Shortfall aversion describes a form of consumption habit formation in which an individual's utility depends on consumption relative to the historical consumption peak. This study develops a duality framework for a broad class of utility functions, with and without discounting, avoiding the need for determining the local optimality required by the HJB approaches commonly adopted in the literature. We show that shortfall aversion can instead be incorporated directly into the dual problem through a singular-control mechanism characterized by a variational inequality. Furthermore, we establish that the resulting value function strictly dominates those obtained in the existing literature while remaining attainable under an admissible optimal control.",
+   "published": "2026-10-23T08:45:04Z",
+   "authors": [
+    "Jaehyun Kim",
+    "Hoi Ying Wong"
+   ],
+   "tags": [
+    "q-fin.MF"
+   ],
+   "source": "ARXIV",
+   "category": "Methods & Computation",
+   "thumb": "/research-thumbs/39842869cbcfb20b3b7ee3a5f09e8434080d02d8.jpg"
+  },
+  {
+   "title": "News shocks and inflation: theory and evidence from large oil discoveries",
+   "link": "https://www.bis.org/publications/working-paper-1389-news-shocks-and-inflation-theory-and-evidence-from-large-oil-discoveries",
+   "summary": "We study hownews shocks affect inflation in open economies, using large oil and gas discoveries with realized production lags of at least five years as observable news about future output. Panel local projections show that discoveries raise core consumer prices over the subsequent decade, with about half the increase occurring prior to extraction.",
+   "published": "2026-10-23T00:00:00Z",
+   "authors": [
+    "Bohou Cai",
+    "Liugang Sheng",
+    "Hongyan Zhao"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/ddc42277e74faf297c2e1a62c0952b00559ceb75.jpg"
+  },
+  {
+   "title": "Bank liquidity regulation and the growth of private credit",
+   "link": "https://www.bis.org/publications/bank-liquidity-regulation-and-growth-private-credit",
+   "summary": "We study the role of bank liquidity regulation in the growth of private credit. Following the introduction of the liquidity coverage ratio (LCR), private credit increases significantly more in U.S. counties with a larger footprint of banks subject to the LCR or of LCR banks with greater initial liquidity shortfalls.",
+   "published": "2026-10-20T00:00:00Z",
+   "authors": [
+    "Sebastian Doerr",
+    "Gaston Gelos",
+    "Vesa Pursiainen"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/662ff228c5b0c8e0f83c65464127e1196e04218b.jpg"
+  },
+  {
+   "title": "Headwind or tailwind? How banks interpret borrowers’ AI exposure",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3302~7ff8a286bc.en.pdf",
+   "summary": "General-purpose technologies create large opportunities but make their distribution across firms difficult to assess in real time. We use banks as interpreters of the rise of generative AI by studying lender-specific probability-of-default (PD) estimates for private firms in four large euro-area economies. As public attention to AI rises after ChatGPT, banks lower assessed default risk for borrowers in highly AI-exposed industries by about 5%. The reassessment is weaker for labor-intensive firms and stronger among lenders with pre-existing industry expertise. Yet the favorable industry-level effect is accompanied by a systematic reordering within product markets: banks reassess firms with stronger pre-ChatGPT market positions less favorably relative to their competitors, compressing the risk advantage associated with market leadership.",
+   "published": "2026-10-19T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Machine Learning",
+   "thumb": "/research-thumbs/eb2b871344cb6c098a184f0884029b55fd753f16.jpg"
+  },
+  {
+   "title": "Competing rails for crossborder payments: banks, fintechs, and stablecoins",
+   "link": "https://www.bis.org/publications/working-paper-1385-competing-rails-crossborder-payments-banks-fintechs-and-stablecoins",
+   "summary": "Cross-border payments remain slow and expensive despite significant improvements in digital financial infrastructure over the past several decades.",
+   "published": "2026-10-19T00:00:00Z",
+   "authors": [
+    "Wenxin Du",
+    "Catherine Huang",
+    "David Scharfstein"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Digital Assets",
+   "thumb": "/research-thumbs/2dd79f84431a875e82333132fb82cc8ce36b439e.jpg"
+  },
+  {
+   "title": "Inflation after the Iran war",
+   "link": "https://www.bis.org/publications/working-paper-1384-inflation-after-iran-war",
+   "summary": "An unexpected increase in energy costs raises inflation directly through flexibly-set prices. Whether that shock amplifies to a larger and persistent rise in inflation depends on its transmission through the economy.",
+   "published": "2026-10-19T00:00:00Z",
+   "authors": [
+    "Ricardo Reis"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/d270e9c25e78d923a7a3379e89ef98eb5ce5ca8c.jpg"
+  },
+  {
+   "title": "Offshore forwards and exchange rate transmission in emerging markets",
+   "link": "https://www.bis.org/publications/working-paper-1383-offshore-forwards-and-exchange-rate-transmission-emerging-markets",
+   "summary": "We study how offshore non-deliverable forward (NDF) markets transmit exchange-rate pressures to domestic currency markets. Using unique transaction-level data on the universe of centrally cleared NDFs for ten emerging-market currencies over 2013–2025, we show that offshore NDF order flow moves both offshore forward and domestic spot exchange rates and widens the offshore–onshore forward spread.",
+   "published": "2026-10-16T00:00:00Z",
+   "authors": [
+    "Gerardo Ferrara",
+    "Andreas Schrimpf",
+    "Ganesh Viswanath-Natraj",
+    "Zijie Wang"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Microstructure & Trading",
+   "thumb": "/research-thumbs/028c8790a21e6b440c7c7a79e60d8178dd226e53.jpg"
+  },
+  {
+   "title": "Stop believing in haircuts - at least the way you think about them",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3301~1585c96063.en.pdf",
+   "summary": "We study how frictions impact haircut setting in repo markets. Using transaction-level supervisory data and exploiting the 2021 introduction of the binding leverage ratio requirement, we show that three frictions jointly shape haircuts in the bilateral dealer-to-client segment: dealer balance sheet constraints, collateral convenience yields, and client outside options. In collateral-driven repos, binding leverage constraints and broader client outside options both raise haircuts, while higher convenience yields push them down. In funding-driven trades, the leverage constraint has no effect, higher convenience yields raise haircuts through the rehypothecation channel, and broader client outside options lower them. We rationalise these patterns in a bilateral bargaining model with periodic haircut renegotiation.",
+   "published": "2026-10-15T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/3b271333c85d3a1939312b8f6e13a2d178affdb4.jpg"
+  },
+  {
+   "title": "When less is more: behavioral effects of CBDC holding limits",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3300~0277bae3af.en.pdf",
+   "summary": "Holding limits are a central design feature of proposed retail central bank digital currencies (CBDC). While such limits mechanically prevent individuals from exceeding a maximum balance, they may also generate behavioral responses whose directions are a priori unclear. We conducted an incentivized online experiment with participants from four euro-area countries, exogenously varying the presence and level of a holding limit to causally separate direct mechanical effects from behavioral effects. We find that behavioral responses increase holdings of the means of payment subject to the holding limit, consistent with an attraction effect. This effect is material only when the limit is high enough. Enabling reverse waterfall —automatic conversion into this limited means of payment— increases adoption while reducing holdings.",
+   "published": "2026-10-15T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Digital Assets",
+   "thumb": "/research-thumbs/e5f5f3e6b5682fa06fa72e4e3ed224243053954a.jpg"
+  },
+  {
+   "title": "FEDS Paper: A Macroeconomic Analysis of Household Labor Supply Responses to Large Fiscal Transfers",
+   "link": "https://www.federalreserve.gov/econres/feds/a-macroeconomic-analysis-of-household-labor-supply-responses-to-large-fiscal-transfers.htm",
+   "summary": "Isabel Cairó , Shigeru Fujita, and Camilo Morales-Jimenez The fiscal transfers deployed during the COVID-19 pandemic were unprecedented in scale and strongly progressive. Using CPS/ASEC data, we document that the decline in employment during the pandemic was larger for low-income households and tightly linked to the intensity of transfer receipt, a pattern absent during the Global Financial Crisis. We develop and estimate a two-sector, heterogeneous-household general equilibrium model in which low-income households are borrowing-constrained in normal times but can save out of sufficiently large transfers. Because preferences permit wealth effects on labor supply, transfers both reduce labor supply and raise consumption, and a dollar of transfers is split roughly evenly between the two margins.",
+   "published": "2026-10-14T15:25:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "FED",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/476bd37452beccce1654a5e96152e6442e239cdb.jpg"
+  },
+  {
+   "title": "The heterogeneous bank lending channel of monetary policy",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3299~01776adb36.en.pdf",
+   "summary": "How does heterogeneity in banks’ interest-rate risk exposure shape monetary policy transmission? We develop a quantitative macroeconomic model of heterogeneous banks to answer this question. We establish an irrelevance result: differences in interest-rate risk exposure between fixed- and variable-rate banking systems matter for transmission only when bank solvency concerns become relevant. Calibrating the model to the euro area, we show that idiosyncratic default risk pushes a substantial share of banks toward the solvency threshold, making heterogeneity quantitatively important. When policy rates rise, fixed-rate banks suffer net interest margin compression—funding costs increase while legacy loan income stays unchanged—eroding capital and triggering sharper deleveraging. The lending elasticity to monetary policy is one-third larger in fixed-rate economies.",
+   "published": "2026-10-14T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Portfolio & Factors",
+   "thumb": "/research-thumbs/0c073bfabf89d813c16d6681ff1b13aaa3529285.jpg"
+  },
+  {
+   "title": "What analysts hear and why it matters for monetary policy",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3298~06485c09a7.en.pdf",
+   "summary": "We introduce a novel measure of how European Central Bank (ECB) monetary policy is interpreted by analysts at major investment banks. We construct a “policy interpretation shock” based on the language used in analysts’ reports covering monetary policy decisions by the ECB’s Governing Council (GovC). The main identifying assumption is that changes in the way analysts report on policy communication by the GovC—that is, the change in the policy tone from the preview report to the recap report—reflect unexpected information revealed by the policy event. Using GPT-based sentiment extraction, we show that the tone in these reports closely tracks that of the GovC, often even anticipating shifts in tone. Changes in the policy tone before and after meetings capture how market intermediaries interpret and adjust their assessment of policy decisions.",
+   "published": "2026-10-14T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/0e3f9f0d8e9214c016433578929431bb25b81531.jpg"
+  },
+  {
+   "title": "FEDS Paper: Inattentive Price Setting and Inflation Under Fiscal Policy Uncertainty",
+   "link": "https://www.federalreserve.gov/econres/feds/inattentive-price-setting-and-inflation-under-fiscal-policy-uncertainty.htm",
+   "summary": "Oliver Pfäuti and Edson Wu How do high public debt and fiscal uncertainty interact to shape inflation? We develop a model in which firms face uncertainty about both marginal costs and fiscal policy and choose how much information to acquire before setting prices. Higher debt raises steady-state taxes, affecting attention through two opposing forces. While these taxes reduce the profit stakes of mispricing, they make desired prices more sensitive to tax fluctuations, increasing the value of information. The interaction generates a U-shaped relationship between public debt and attention, and therefore between debt and inflation volatility. Using euro-area firm-level expectations data, we document that the passthrough of expected input-cost growth into expected selling-price growth rises systematically with a country's debt-to-GDP ratio, consistent with the model.",
+   "published": "2026-10-13T12:30:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "FED",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/b0356f602f08365d4e199d292f748c09c8b1dcbf.jpg"
+  },
+  {
+   "title": "Are stablecoins and bank deposits substitutes?",
+   "link": "https://www.bis.org/publications/working-paper-1382-are-stablecoins-and-bank-deposits-substitutes",
+   "summary": "We test whether stablecoins and bank deposits act as substitutes by estimating the semi-elasticity of stablecoin market capitalization with respect to deposit rate changes. Using local projections fit to weekly U.S. data from January 2019 to June 2025, we find that deposit rate increases predict slower stablecoin growth. To address endogeneity, we exploit a nonlinearity in deposit rate pass-through.",
+   "published": "2026-10-13T00:00:00Z",
+   "authors": [
+    "Rashad Ahmed",
+    "Iñaki Aldasoro"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Digital Assets",
+   "thumb": "/research-thumbs/01fe7a5ed504ef11252b923884fcef565a47150b.jpg"
+  },
+  {
+   "title": "Fiscal integration as a Pareto improvement",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3297~601502aed4.en.pdf",
+   "summary": "Fiscal integration in a currency union is generally understood as a transfer from fiscally strong to fiscally weak countries. I show that this changes when common debt is paired with a non-defaultable common tax, even if national debt remains defaultable. The risky country gains from intertemporal trade: it receives a grant financed by a perpetual obligation it discounts more heavily than lenders do. The cost to the safe member is second-order and the tax removes it by insuring imperfectly correlated cycles rather than transferring resources in expectation. The calibration delivers a narrow Pareto-improving region: the tax that eliminates the risky country’s perverse incentive to default is negligible, while the tax that compensates the safe country is an order of magnitude larger.",
+   "published": "2026-10-12T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/48a556a2241bd4c44d1bb001c41e1c2b57a7d233.jpg"
+  },
+  {
+   "title": "Does shareholder diversification enhance firm investment resilience? Evidence from the euro area",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3296~db309862b0.en.pdf",
+   "summary": "This paper develops novel firm-level measures of shareholder geographical concentration and examines how elevated home bias in equity holdings affects investment resilience in the euro area. We combine security-level holdings data from the ECB’s Securities Holdings Statistics (SHS-S) with firm-level financial-statement data from Compustat, and document that equity ownership remains strongly concentrated domestically, with limited cross-border diversification within the monetary union. Using a difference-in-differences design around the COVID-19 shock, combined with a propensity score matching approach, we then analyse whether equity home bias shapes firms’ responses to macroeconomic disruptions.",
+   "published": "2026-10-07T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Portfolio & Factors",
+   "thumb": "/research-thumbs/7d59611129540f8380ef41e441a6e8db5fb38e39.jpg"
+  },
+  {
+   "title": "Monitoring banks’ vulnerabilities using stressed depletion indices",
+   "link": "https://www.ecb.europa.eu//pub/pdf/scpwps/ecb.wp3295~5961ce0e96.en.pdf",
+   "summary": "We introduce two indicators to track the build-up of vulnerabilities in the euro area banking sector on a quarterly basis by leveraging the information collected in EU-wide solvency stress tests. First, we introduce an indicator of conditional capital depletion, the Stress Vulnerability Index (SVI), which quantifies potential losses under adverse scenarios when tail credit risk is highest. Second, we introduce an indicator of earnings vulnerability, the Profitability Vulnerability Index (PVI), which assesses the capacity of the banking sector to generate capital organically. While the two indices spike synchronously during systemic crises, they can also decouple. We show that this occurs when tail risks to capital subside but earnings remain compressed, or conversely, when recessionary fears mount while current profitability strengthens.",
+   "published": "2026-10-07T09:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "ECB",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/b613f18115792584ceaf75be251b576b347d1ee7.jpg"
+  },
+  {
+   "title": "Chasing El Dorado: gold under shifting geopolitical and financial conditions",
+   "link": "https://www.bis.org/publications/working-paper-1380-chasing-el-dorado-gold-under-shifting-geopolitical-and-financial-condition",
+   "summary": "This paper analyses the state-dependent effects of geopolitical risks on gold prices (i.e. the safe-haven role of gold), conditional on financial conditions. Geopolitical risks are often associated with tighter financial conditions. However, recent data reveal a decoupling between such shocks and more restrictive financial conditions, raising the question of how gold returns are affected by geopolitical shocks, conditional on the macro-financial environment.",
+   "published": "2026-10-06T00:00:00Z",
+   "authors": [
+    "Rafael Guerra",
+    "Gabriel Zelpo"
+   ],
+   "tags": [],
+   "source": "BIS",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/446217aa6de1df2346b725c7f59dab96f162f049.jpg"
+  },
+  {
+   "title": "FEDS Paper: Bells and Whistles of Nowcasting Models: Which Matter and When?",
+   "link": "https://www.federalreserve.gov/econres/feds/bells-and-whistles-of-nowcasting-models-which-matter-and-when.htm",
+   "summary": "Freddy García-Albán and Manuel González-Astudillo This paper investigates which features of a Bayesian dynamic factor model improve U.S. GDP nowcasts and whether their contribution varies across historical episodes. Using pseudo-real-time information sets for 25 series, we estimate 16 combinations of dynamic heterogeneity, stochastic volatility, time-varying long-run growth, and a multiplicative outlier adjustment. We evaluate their marginal contributions to point, density, and quantile score forecasts using balanced paired factorial contrasts. Dynamic heterogeneity improves point, density, and tail forecasts, and it is the only feature that helps consistently across all three criteria. Stochastic volatility improves density and tail forecasts in some periods but not point forecasts consistently.",
+   "published": "2026-10-02T18:16:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "FED",
+   "category": "Portfolio & Factors",
+   "thumb": "/research-thumbs/eef513e123987f948089902018b6cc44a95f133b.jpg"
+  },
+  {
+   "title": "FEDS Paper: How Did CECL Affect Bank Lending?",
+   "link": "https://www.federalreserve.gov/econres/feds/how-did-cecl-affect-bank-lending.htm",
+   "summary": "Ben Ranish and Cindy M. Vojtech Adoption of the current expected credit losses (CECL) methodology for loan loss provisioning significantly altered how banks recognize loan losses in their capital calculations. Because capital is a more costly funding source for banks, the accounting change affects banks' cost of funding loans. Using variation in the timing and effect of CECL implementation across firms and loan types, this paper finds that loan loss allowances have a similar causal effect on credit supply as capital requirements. Within our sample, the effect of CECL adoption on loan allowances reduced loan growth by approximately 77 basis points annually in the years following adoption. We find no significant effect of CECL on capital distributions.",
+   "published": "2026-09-25T19:00:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "FED",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/4d3393d436fbdb73339de67c98b30912cf114dc0.jpg"
+  },
+  {
+   "title": "FEDS Paper: Beyond Financial Conditions: Measuring Structural Vulnerabilities in the U.S. Financial System",
+   "link": "https://www.federalreserve.gov/econres/feds/beyond-financial-conditions-measuring-structural-vulnerabilities-in-the-us-financial-system.htm",
+   "summary": "Michele Modugno , Benjamin Roscoe, Sarah Zoi We introduce the Financial Vulnerability Index (FVI), a novel indicator of financial vulnerabilities in the U.S. Unlike financial condition indices, which measure current credit market conditions and spike during periods of financial turmoil, the FVI displays the gradual build-up of structural financial weaknesses and declines as such episodes materialize. We demonstrate that the FVI exhibits properties consistent with theoretical mechanisms of financial vulnerabilities. When the index is high, adverse shocks are substantially amplified, generating larger declines in consumption and investment. We provide new empirical evidence that monetary tightening is associated with gradual declines in the FVI, with this effect substantially delayed, taking a few years to fully materialize.",
+   "published": "2026-09-21T19:15:00Z",
+   "authors": [],
+   "tags": [],
+   "source": "FED",
+   "category": "Macro & Banking",
+   "thumb": "/research-thumbs/f77d07d57fdb41ea1d183bdb0122b9dc5c993121.jpg"
+  }
+ ]
+}

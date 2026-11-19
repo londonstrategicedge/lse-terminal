@@ -2874,7 +2874,7 @@ const ChartDrawingOverlayComponent = ({
         return p.toFixed(5);
       };
 
-      // Calculate pips based on instrument type (IC Markets standard)
+      // Calculate pips based on instrument type (the usual retail FX/CFD convention)
       // Gold (XAU): pip = $0.10 -> $1 = 10 pips
       // Silver (XAG): pip = $0.01 -> $1 = 100 pips
       // JPY forex pairs: pip = 0.01 -> multiplier 100
@@ -2910,7 +2910,7 @@ const ChartDrawingOverlayComponent = ({
         pipMultiplier = 10000;    // 0.0001 = 1 pip
         pipLabel = 'pips';
       } else {
-        // Crypto & stocks: determine by price magnitude (IC Markets standard)
+        // Crypto & stocks: determine by price magnitude (the usual retail FX/CFD convention)
         if (entryPrice >= 1000) {
           pipMultiplier = 1;      // BTC: $1 = 1 pip
         } else if (entryPrice >= 10) {
@@ -4684,7 +4684,7 @@ const ChartDrawingOverlayComponent = ({
     // Calculate candles based on timeframe
     const candleCount = Math.floor(timeDiffMs / timeframeMs);
 
-    // Calculate points/pips based on instrument type (IC Markets standard)
+    // Calculate points/pips based on instrument type (the usual retail FX/CFD convention)
     const sym = currentSymbol?.toUpperCase() || '';
     const isGoldMeasure = sym.includes('XAU') || sym.includes('GOLD');
     const isSilverMeasure = sym.includes('XAG') || sym.includes('SILVER');

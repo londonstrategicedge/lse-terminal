@@ -36,6 +36,9 @@ export interface ProChartProps {
   candles: Candle[];
   livePrice?: number | null;
   symbol?: string;
+  // The source this chart shows (the shell's provider): its declared price
+  // digits are read by source and symbol (setPriceDigits). None: none read.
+  priceSource?: string | null;
   timezone?: string;
   countdown?: string;
   onCrosshairMove?: (price: number | null, time: number | null) => void;

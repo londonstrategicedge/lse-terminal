@@ -22,10 +22,21 @@ _pc = importlib.util.find_spec("brueconnect")
 if _pc is None or not _pc.submodule_search_locations:
     raise SystemExit(
         "brueconnect is not installed in the build venv. Install the "
-        "sibling clone first (pip install -e ../brue-connect): the frozen "
+        "sibling clone first (pip install -e ../brue): the frozen "
         "app both bakes it into the PYZ and ships it as real files, and the "
         "two copies must come from the same install.")
 BRUECONNECT_DIR = list(_pc.submodule_search_locations)[0]
+# The starter adapter that Connections offers ("+ Add your own broker", then
+# "Download the starter adapter") is a file of the kit. A kit without it
+# builds an app whose card says "Update the terminal" where the
+# walkthrough's first step says to download it, so it is refused here.
+if not os.path.isfile(os.path.join(BRUECONNECT_DIR, "templates",
+                                   "my_broker_adapter.py")):
+    raise SystemExit(
+        "The brueconnect in the build venv (%s) has no "
+        "templates/my_broker_adapter.py, the starter adapter the "
+        "Connections screen offers. Install Brue 0.0.2 or newer "
+        "(pip install -e ../brue) before building." % BRUECONNECT_DIR)
 
 datas = [(os.path.join(ROOT, "lse_terminal", "ui", "static"), "lse_terminal/ui/static"),
          # The bundled sample datasets. Without this line the samples
@@ -50,7 +61,16 @@ datas = [(os.path.join(ROOT, "lse_terminal", "ui", "static"), "lse_terminal/ui/s
          # until this line (found in the same sweep of package-relative
          # disk reads that turned up the ML scripts).
          (os.path.join(ROOT, "lse_terminal", "indicators", "brue"), "lse_terminal/indicators/brue"),
-         (BRUECONNECT_DIR, "brueconnect")]
+         (BRUECONNECT_DIR, "brueconnect"),
+         # The same package again, in a directory that holds NOTHING else.
+         # Adapters run under the user's own Python, and broker_hub.sdk_dir
+         # puts this directory on their import path instead of _internal:
+         # _internal also holds this app's numpy, pandas and (on Windows) the
+         # bundled Python's extension modules, which can shadow another
+         # interpreter's own. Bundled adapters are spawned from this copy
+         # too, because each inserts its own grandparent directory on
+         # sys.path and that must not be _internal either.
+         (BRUECONNECT_DIR, "brue-sdk/brueconnect")]
 binaries = []
 hiddenimports = ['multipart', 'python_multipart', 'uvicorn.logging']
 hiddenimports += collect_submodules('lse_terminal')

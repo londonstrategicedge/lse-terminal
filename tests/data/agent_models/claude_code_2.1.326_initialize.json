@@ -1,0 +1,42 @@
+{
+ "type": "control_response",
+ "response": {
+  "subtype": "success",
+  "request_id": "n",
+  "response": {
+   "models": [
+    {
+     "value": "default",
+     "displayName": "Default (recommended)",
+     "description": "Use the default model (currently Opus 5.5) · $4/$20 per Mtok",
+     "resolvedModel": "claude-opus-5-5"
+    },
+    {
+     "value": "opus",
+     "displayName": "Opus",
+     "description": "Opus 5.5 · Best for everyday, complex tasks · $4/$20 per Mtok",
+     "resolvedModel": "claude-opus-5-5"
+    },
+    {
+     "value": "fable",
+     "displayName": "Fable",
+     "description": "Fable 5.2 · Most capable for your hardest and longest-running tasks · $8/$40 per Mtok",
+     "resolvedModel": "claude-fable-5-2"
+    },
+    {
+     "value": "sonnet",
+     "displayName": "Sonnet",
+     "description": "Sonnet 5.5 · Efficient for routine tasks · $2/$10 per Mtok",
+     "resolvedModel": "claude-sonnet-5-5"
+    },
+    {
+     "value": "haiku",
+     "displayName": "Haiku",
+     "description": "Haiku 5.5 · Fastest for quick answers · $0.10/$0.50 per Mtok ($0.50/$2.50 for prompts over 100k)",
+     "resolvedModel": "claude-haiku-5-5"
+    }
+   ],
+   "unavailable_models": []
+  }
+ }
+}

@@ -1,0 +1,44 @@
+{
+  "python": "3.11.9 (tags/v3.11.9:de54cf5, Apr  2 2024, 10:12:12) [MSC v.1938 64 bit (AMD64)]",
+  "rows": [
+    {
+      "module": "lse.cli",
+      "source": "cli.py",
+      "bundled": false
+    },
+    {
+      "module": "lse.client",
+      "source": "client.py",
+      "bundled": true,
+      "installed_code": "29579436be9b62e134a6a4b7599aec1c2afe9755e8b3afc861bf1079d50f2863",
+      "source_code": "29579436be9b62e134a6a4b7599aec1c2afe9755e8b3afc861bf1079d50f2863",
+      "equal": true,
+      "source_sha256": "eed9bd8befce1a679c891ebac41c6c3a7bb92e261263954b944c2197ce6e0715"
+    },
+    {
+      "module": "lse.tui",
+      "source": "tui.py",
+      "bundled": false
+    },
+    {
+      "module": "lse.vault",
+      "source": "vault.py",
+      "bundled": true,
+      "installed_code": "e638ca0dc83dcd097161d8a4bd7a19640562a4dde745e6564da0e8f180f7d7fe",
+      "source_code": "e638ca0dc83dcd097161d8a4bd7a19640562a4dde745e6564da0e8f180f7d7fe",
+      "equal": true,
+      "source_sha256": "be31cc1b28954aca1a47fe113c3a54c67a69b8d4c65063c9824915bc882456d1"
+    },
+    {
+      "module": "lse",
+      "source": "__init__.py",
+      "bundled": true,
+      "installed_code": "50cc3854225b7e67913ffddf1936bb359247cc58b095b472e97915a026a733e0",
+      "source_code": "50cc3854225b7e67913ffddf1936bb359247cc58b095b472e97915a026a733e0",
+      "equal": true,
+      "source_sha256": "5ee07b174840ca5042bc00b3a836f7765974f04ff94ff9b375783325aa03a213"
+    }
+  ],
+  "bundled_missing_source": [],
+  "mismatches": []
+}
